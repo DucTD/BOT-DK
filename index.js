@@ -275,4 +275,6 @@ setInterval(async () => {
 }, 60 * 60 * 1000);
 
 /* ================= START ================= */
+
 client.login(process.env.TOKEN);
+require('http').createServer((_, res) => res.end('OK')).listen(process.env.PORT || 3000);
