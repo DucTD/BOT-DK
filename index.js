@@ -8,10 +8,12 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  Events
+  Events,
+  EmbedBuilder
 } = require('discord.js');
 
 const fs = require('fs');
+const QRCode = require('qrcode');
 const fetch = (...args) =>
   import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
@@ -49,7 +51,8 @@ const PRICE_JP = { '1m': 12000, '6m': 60000, '1y': 108000 };
 /* ================= PAYMENT INFO ================= */
 const PAYMENT = {
   VN: {
-    bank: 'Vietcombank',
+    bankName: 'Vietcombank',
+    bankBin: '970436', // Vietcombank BIN chuẩn VietQR
     accountName: 'NGUYEN VAN A',
     accountNumber: '0123456789'
   },
@@ -78,6 +81,14 @@ const addMonths = (base, m) => {
 };
 
 const planToMonth = p => (p === '6m' ? 6 : p === '1y' ? 12 : 1);
+
+/* ================= VIETQR GENERATOR ================= */
+function generateVietQR({ bin, account, amount, note }) {
+  const payload =
+`00020101021138540010A00000072701240006${bin}0108${account}0208QRIBFTTA530370454${amount}5802VN6220${note.length}${note}6304`;
+
+  return payload;
+}
 
 /* ================= ROLE LOGIC ================= */
 async function updateWaitingRole(guild, userId, plan) {
@@ -135,35 +146,77 @@ client.on(Events.InteractionCreate, async i => {
     members[id].transferNote = `DISCORD_${id}`;
     saveDB();
 
-    if (c === 'VN') {
-      const amount = PRICE_VN[members[id].plan];
-      return i.reply({
-        ephemeral: true,
-        content:
-`💳 Thanh toán VN
-🏦 ${PAYMENT.VN.bank}
-👤 ${PAYMENT.VN.accountName}
-🔢 ${PAYMENT.VN.accountNumber}
-💰 ${amount.toLocaleString()} VND
-📝 ${members[id].transferNote}
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('confirm_paid')
+        .setLabel('✅ Tôi đã chuyển khoản')
+        .setStyle(ButtonStyle.Success)
+    );
 
-➡️ Sau khi chuyển khoản, **DM bot gửi ảnh bill**`
+    let amount, embedColor, qrContent;
+
+    if (c === 'VN') {
+      amount = PRICE_VN[members[id].plan];
+      embedColor = 0x00A86B;
+
+      qrContent = generateVietQR({
+        bin: PAYMENT.VN.bankBin,
+        account: PAYMENT.VN.accountNumber,
+        amount,
+        note: members[id].transferNote
       });
     }
 
     if (c === 'JP') {
-      const p = PAYMENT.JP;
-      return i.reply({
-        ephemeral: true,
-        content:
-`💳 Thanh toán JP
-🏦 ${p.bank} - ${p.branch}
-👤 ${p.accountName}
-🔢 ${p.accountNumber}
-💰 ${PRICE_JP[members[id].plan]} JPY
+      amount = PRICE_JP[members[id].plan];
+      embedColor = 0xE60012;
+
+      qrContent =
+`BANK:${PAYMENT.JP.bank}
+BRANCH:${PAYMENT.JP.branch}
+ACC:${PAYMENT.JP.accountNumber}
+NAME:${PAYMENT.JP.accountName}
+AMOUNT:${amount}
+NOTE:${members[id].transferNote}`;
+    }
+
+    const qrImage = await QRCode.toBuffer(qrContent);
+
+    const embed = new EmbedBuilder()
+      .setTitle('💳 Thông tin thanh toán')
+      .setColor(embedColor)
+      .setDescription(
+`💰 ${amount.toLocaleString()} ${c === 'VN' ? 'VND' : 'JPY'}
 📝 ${members[id].transferNote}
 
-➡️ Sau khi chuyển khoản, **DM bot gửi ảnh bill**`
+Sau khi chuyển khoản xong hãy bấm nút bên dưới`
+      )
+      .setImage('attachment://qr.png')
+      .setFooter({ text: 'Payment System • Secure Transaction' });
+
+    return i.reply({
+      ephemeral: true,
+      embeds: [embed],
+      files: [{ attachment: qrImage, name: 'qr.png' }],
+      components: [row]
+    });
+  }
+
+  /* USER CONFIRM */
+  if (i.customId === 'confirm_paid') {
+    try {
+      await i.user.send(
+`📸 Vui lòng gửi ảnh bill tại đây (DM này).`
+      );
+
+      return i.reply({
+        ephemeral: true,
+        content: '📩 Tôi đã gửi DM cho bạn.'
+      });
+    } catch {
+      return i.reply({
+        ephemeral: true,
+        content: '❌ Không thể gửi DM. Hãy bật nhận tin nhắn từ server.'
       });
     }
   }
@@ -197,25 +250,22 @@ client.on(Events.InteractionCreate, async i => {
   }
 });
 
-/* ================= DM BILL UPLOAD ================= */
+/* ================= DM BILL ================= */
 client.on(Events.MessageCreate, async message => {
   if (message.guild) return;
   if (message.author.bot) return;
 
   const id = message.author.id;
 
-  if (!members[id]?.plan) {
-    return message.reply('❌ Bạn chưa chọn gói trong server.');
-  }
+  if (!members[id]?.plan)
+    return message.reply('❌ Bạn chưa chọn gói.');
 
-  if (message.attachments.size === 0) {
-    return message.reply('📸 Vui lòng gửi **ảnh bill**.');
-  }
+  if (message.attachments.size === 0)
+    return message.reply('📸 Vui lòng gửi ảnh bill.');
 
   const file = message.attachments.first();
-  if (!file.contentType?.startsWith('image/')) {
+  if (!file.contentType?.startsWith('image/'))
     return message.reply('❌ Chỉ chấp nhận file ảnh.');
-  }
 
   if (!fs.existsSync('./uploads')) fs.mkdirSync('./uploads');
 
@@ -233,6 +283,7 @@ client.on(Events.MessageCreate, async message => {
   await updateWaitingRole(guild, id, members[id].plan);
 
   const adminCh = await client.channels.fetch(process.env.ADMIN_CHANNEL_ID);
+
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`approve_${id}`).setLabel('Approve').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`reject_${id}`).setLabel('Reject').setStyle(ButtonStyle.Danger)
@@ -240,11 +291,11 @@ client.on(Events.MessageCreate, async message => {
 
   await adminCh.send({
     content:
-`🧾 BILL (DM)
+`🧾 BILL
 👤 <@${id}>
-📦 Plan: ${members[id].plan}
-🌏 Pay: ${members[id].payCountry}
-📝 Note: ${members[id].transferNote}`,
+📦 ${members[id].plan}
+🌏 ${members[id].payCountry}
+📝 ${members[id].transferNote}`,
     files: [{ attachment: filePath }],
     components: [row]
   });
@@ -252,7 +303,7 @@ client.on(Events.MessageCreate, async message => {
   return message.reply('✅ Đã nhận bill! Vui lòng chờ admin duyệt.');
 });
 
-/* ================= AUTO JOB ================= */
+/* ================= AUTO CLEAN ================= */
 setInterval(async () => {
   const now = Date.now();
   const guild = await client.guilds.fetch(process.env.GUILD_ID);
@@ -275,6 +326,5 @@ setInterval(async () => {
 }, 60 * 60 * 1000);
 
 /* ================= START ================= */
-
 client.login(process.env.TOKEN);
 require('http').createServer((_, res) => res.end('OK')).listen(process.env.PORT || 3000);
