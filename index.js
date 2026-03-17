@@ -52,16 +52,16 @@ const PRICE_JP = { '1m': 12000, '6m': 60000, '1y': 108000 };
 /* ================= PAYMENT INFO ================= */
 const PAYMENT = {
   VN: {
-    bankName: 'Vietcombank',
-    bankBin: '970436',
-    accountName: 'NGUYEN VAN A',
-    accountNumber: '0123456789'
+    bankName: 'Techcombank',
+    bankBin: '970407',
+    accountName: 'NGUYEN DUY THINH',
+    accountNumber: '86196868888'
   },
   JP: {
-    bank: 'MUFG Bank',
-    branch: 'Shinjuku',
-    accountNumber: '1234567',
-    accountName: 'NGUYEN VAN A'
+    bank: 'SMBC Bank',
+    branch: '目白支店　(メジロ) 677',
+    accountNumber: '６９７０８９４',
+    accountName: 'グエンズイテイン'
   }
 };
 
