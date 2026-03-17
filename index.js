@@ -1,5 +1,5 @@
 require('dotenv').config();
-
+console.log("🔥 FILE INDEX.JS ĐANG CHẠY");
 /* ================= IMPORT ================= */
 const {
   Client,
