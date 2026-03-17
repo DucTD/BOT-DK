@@ -1,4 +1,11 @@
 require('dotenv').config();
+const https = require('https');
+
+https.get('https://discord.com/api/v10', (res) => {
+  console.log("🌐 Discord API status:", res.statusCode);
+}).on('error', (e) => {
+  console.error("❌ Cannot reach Discord:", e.message);
+});
 console.log("🔥 FILE INDEX.JS ĐANG CHẠY");
 /* ================= IMPORT ================= */
 const {
