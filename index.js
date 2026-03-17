@@ -138,9 +138,17 @@ async function updateFinalRole(guild, userId, plan) {
 
 /* ================= START ================= */
 
+client.once('ready', () => {
+  console.log(`✅ Logged in as ${client.user.tag}`);
+});
+
 client.login(process.env.TOKEN)
-  .then(() => console.log("🚀 LOGIN SUCCESS"))
-  .catch(err => console.error("❌ LOGIN ERROR:", err));
+  .then(() => {
+    console.log("🚀 LOGIN SUCCESS");
+  })
+  .catch(err => {
+    console.error("❌ LOGIN ERROR:", err);
+  });
 
 require('http')
   .createServer((_, res) => res.end('OK'))
