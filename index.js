@@ -138,6 +138,8 @@ async function updateFinalRole(guild, userId, plan) {
 
 /* ================= START ================= */
 
+console.log("👉 BEFORE LOGIN");
+
 client.once('ready', () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 });
@@ -149,6 +151,8 @@ client.login(process.env.TOKEN)
   .catch(err => {
     console.error("❌ LOGIN ERROR:", err);
   });
+
+console.log("👉 AFTER LOGIN");
 
 require('http')
   .createServer((_, res) => res.end('OK'))
