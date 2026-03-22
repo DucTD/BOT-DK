@@ -123,13 +123,20 @@ client.on(Events.MessageCreate, async message => {
   if (message.content === "!vip") {
 
     const embed = new EmbedBuilder()
-      .setTitle("💎 Kính gửi quý thành viên mới và cũ")
-      .setDescription("Để tiếp tục  sử dụng đầy đủ các quyền hạn và tiện ích trong nhóm, Bạn vui lòng đăng ký để hoàn tất quy trình một cách nhanh chóng và thuận tiện nhé.")
+      .setTitle("📝 ĐĂNG KÝ THÀNH VIÊN KEMINVEST")
+      .setDescription(`Kính gửi quý thành viên mới và cũ.
+
+• Hệ thống hiện tại là **bot tự động hỗ trợ thanh toán phí nhóm**.  
+• Để tiếp tục sử dụng đầy đủ quyền hạn và tiện ích trong nhóm.
+• Vui lòng lựa chọn các gói bên dưới để hoàn tất quy trình một cách nhanh chóng và thuận tiện.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+_Trân trọng cảm ơn ❤️_`
+)
       .setColor("#5865F2")
       .addFields(
-        { name: "1 Tháng", value: "2.000.000đ / 12.000¥" },
-        { name: "6 Tháng", value: "11.000.000đ / 60.500¥" },
-        { name: "1 Năm", value: "22.000.000đ / 121.000¥" }
+        { name: "⭐ 1 Tháng", value: "2.000.000đ / 12.000¥" },
+        { name: "⭐ 6 Tháng", value: "11.000.000đ / 60.500¥" },
+        { name: "⭐ 1 Năm", value: "22.000.000đ / 121.000¥" }
       );
 
     const row = new ActionRowBuilder().addComponents(
