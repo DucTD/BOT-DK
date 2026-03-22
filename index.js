@@ -1,13 +1,5 @@
 require('dotenv').config();
 
-/* ================= DEBUG ================= */
-console.log("🔥 FILE INDEX.JS ĐANG CHẠY");
-console.log("================ ENV DEBUG ================");
-console.log("TOKEN:", process.env.TOKEN ? "OK" : "NULL");
-console.log("GUILD_ID:", process.env.GUILD_ID);
-console.log("ADMIN_CHANNEL_ID:", process.env.ADMIN_CHANNEL_ID);
-console.log("===========================================");
-
 /* ================= IMPORT ================= */
 const {
   Client,
@@ -20,11 +12,18 @@ const {
   EmbedBuilder
 } = require('discord.js');
 
+const express = require('express');
 const fs = require('fs');
 const QRCode = require('qrcode');
 
 const fetch = (...args) =>
   import('node-fetch').then(({ default: fetch }) => fetch(...args));
+
+/* ================= APP ================= */
+const app = express();
+
+/* ================= CONFIG ================= */
+const PORT = process.env.PORT || 3000;
 
 /* ================= DISCORD ================= */
 const client = new Client({
@@ -37,10 +36,16 @@ const client = new Client({
   partials: [Partials.Channel]
 });
 
-/* ================= CONSTANT ================= */
-const DAY = 86400000;
+/* ================= DATABASE ================= */
+const DB_FILE = './members.json';
+let members = fs.existsSync(DB_FILE)
+  ? JSON.parse(fs.readFileSync(DB_FILE))
+  : {};
 
-/* ================= ROLE CONFIG ================= */
+const saveDB = () =>
+  fs.writeFileSync(DB_FILE, JSON.stringify(members, null, 2));
+
+/* ================= ROLE ================= */
 const ROLE_BY_PLAN = {
   '1m': process.env.ROLE_1T_ID,
   '6m': process.env.ROLE_6T_ID,
@@ -54,27 +59,23 @@ const ROLE_WAIT_BY_PLAN = {
 };
 
 /* ================= PRICE ================= */
-const PRICE_VN = { '1m': 2000000, '6m': 10000000, '1y': 18000000 };
-const PRICE_JP = { '1m': 12000, '6m': 60000, '1y': 108000 };
+const PRICE_VN = { '1m': 2000000, '6m': 11000000, '1y': 22000000 };
+const PRICE_JP = { '1m': 12000, '6m': 60500, '1y': 121000 };
 
 /* ================= PAYMENT ================= */
-const PAYMENT = {
-  VN: {
-    bankBin: '970407',
-    accountNumber: '86196868888',
-    accountName: 'NGUYEN DUY THINH'
-  }
+const PAYMENT_VN = {
+  bankName: "Techcombank",
+  bankBin: '970407',
+  accountNumber: '86196868888',
+  accountName: 'NGUYEN DUY THINH'
 };
 
-/* ================= DATABASE ================= */
-const DB_FILE = './members.json';
-
-let members = fs.existsSync(DB_FILE)
-  ? JSON.parse(fs.readFileSync(DB_FILE))
-  : {};
-
-const saveDB = () =>
-  fs.writeFileSync(DB_FILE, JSON.stringify(members, null, 2));
+const PAYMENT_JP = {
+  bankName: "三井住友銀行",
+  branch: "目白支店　(メジロ) 677",
+  accountNumber: "6970894",
+  accountName: "グエンズイテイン"
+};
 
 /* ================= UTIL ================= */
 const addMonths = (base, m) => {
@@ -85,7 +86,7 @@ const addMonths = (base, m) => {
 
 const planToMonth = p => (p === '6m' ? 6 : p === '1y' ? 12 : 1);
 
-/* ================= ROLE ================= */
+/* ================= ROLE FUNC ================= */
 async function updateWaitingRole(guild, userId, plan) {
   const m = await guild.members.fetch(userId).catch(() => null);
   if (!m) return;
@@ -112,74 +113,50 @@ async function updateFinalRole(guild, userId, plan) {
 
 /* ================= READY ================= */
 client.once('ready', () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
+  console.log(`✅ Bot ready: ${client.user.tag}`);
 });
 
-/* ================= INTERACTION ================= */
-client.on(Events.InteractionCreate, async i => {
-
-  if (!i.isButton()) return;
-
-  const id = i.user.id;
-
-  if (!members[id]) members[id] = { expireAt: 0 };
-
-  /* chọn gói */
-  if (['1m', '6m', '1y'].includes(i.customId)) {
-
-    members[id].plan = i.customId;
-    saveDB();
-
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('pay').setLabel('Thanh toán').setStyle(ButtonStyle.Primary)
-    );
-
-    return i.reply({
-      ephemeral: true,
-      content: 'Bấm để thanh toán:',
-      components: [row]
-    });
-  }
-
-  /* thanh toán */
-  if (i.customId === 'pay') {
-
-    const amount = PRICE_VN[members[id].plan];
-    members[id].transferNote = `DISCORD_${id}`;
-    saveDB();
-
-    const qr = await QRCode.toBuffer(`BANK:970407|ACC:86196868888|AMOUNT:${amount}|NOTE:${members[id].transferNote}`);
-
-    return i.reply({
-      ephemeral: true,
-      content: `💰 ${amount.toLocaleString()} VND\n📝 ${members[id].transferNote}`,
-      files: [{ attachment: qr, name: 'qr.png' }]
-    });
-  }
-
-});
-
-/* ================= DM BILL ================= */
+/* ================= MENU + BILL ================= */
 client.on(Events.MessageCreate, async message => {
 
-  if (message.guild) return;
-  if (message.author.bot) return;
+  /* ===== MENU VIP ===== */
+  if (message.content === "!vip") {
+
+    const embed = new EmbedBuilder()
+      .setTitle("💎 Kính gửi quý thành viên mới và cũ")
+      .setDescription("Để tiếp tục  sử dụng đầy đủ các quyền hạn và tiện ích trong nhóm, Bạn vui lòng đăng ký để hoàn tất quy trình một cách nhanh chóng và thuận tiện nhé.")
+      .setColor("#5865F2")
+      .addFields(
+        { name: "1 Tháng", value: "2.000.000đ / 12.000¥" },
+        { name: "6 Tháng", value: "11.000.000đ / 60.500¥" },
+        { name: "1 Năm", value: "22.000.000đ / 121.000¥" }
+      );
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('1m').setLabel('1 Tháng').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('6m').setLabel('6 Tháng').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('1y').setLabel('1 Năm').setStyle(ButtonStyle.Danger)
+    );
+
+    return message.channel.send({ embeds: [embed], components: [row] });
+  }
+
+  /* ===== NHẬN BILL ===== */
+  if (message.guild || message.author.bot) return;
 
   const id = message.author.id;
 
   if (!members[id]?.plan)
-    return message.reply('❌ Bạn chưa chọn gói.');
+    return message.reply('❌ Bạn chưa chọn gói thành viên.');
 
   if (message.attachments.size === 0)
     return message.reply('📸 Gửi ảnh bill.');
 
   const file = message.attachments.first();
-
   const res = await fetch(file.url);
   const buffer = Buffer.from(await res.arrayBuffer());
 
-  if (!fs.existsSync('./uploads'))
-    fs.mkdirSync('./uploads');
+  if (!fs.existsSync('./uploads')) fs.mkdirSync('./uploads');
 
   const path = `./uploads/${id}.png`;
   fs.writeFileSync(path, buffer);
@@ -199,34 +176,104 @@ client.on(Events.MessageCreate, async message => {
     components: [row]
   });
 
-  message.reply('✅ Đã gửi admin.');
+  message.reply({
+    embeds: [
+      new EmbedBuilder()
+        .setTitle("✅ Đã gửi ảnh bill")
+        .setDescription("Cảm ơn bạn đã thanh toán. Bạn vui lòng chờ admin duyệt nhé")
+        .setColor("#00C853")
+    ]
+  });
 });
 
-/* ================= APPROVE ================= */
+/* ================= BUTTON ================= */
 client.on(Events.InteractionCreate, async i => {
-
   if (!i.isButton()) return;
 
-  if (!i.customId.startsWith('approve_')) return;
+  const id = i.user.id;
+  if (!members[id]) members[id] = { expireAt: 0 };
 
-  const id = i.customId.split('_')[1];
-  const m = members[id];
+  /* ===== CHỌN GÓI ===== */
+  if (['1m','6m','1y'].includes(i.customId)) {
+    members[id].plan = i.customId;
+    saveDB();
 
-  const now = Date.now();
+    const embed = new EmbedBuilder()
+      .setTitle("💰 Thanh toán")
+      .setDescription("Chọn phương thức thanh toán")
+      .setColor("#00C853");
 
-  m.expireAt = m.expireAt > now
-    ? addMonths(m.expireAt, planToMonth(m.plan))
-    : addMonths(now, planToMonth(m.plan));
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('pay_vn').setLabel('🇻🇳 VNĐ').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('pay_jp').setLabel('🇯🇵 JPY').setStyle(ButtonStyle.Success)
+    );
 
-  m.remind23 = false;
-  m.remind25 = false;
+    return i.reply({ embeds: [embed], components: [row], ephemeral: true });
+  }
 
-  saveDB();
+  /* ===== PAY VN ===== */
+  if (i.customId === 'pay_vn') {
+    const amount = PRICE_VN[members[id].plan];
+    members[id].currency = 'VN';
+    members[id].transferNote = `DISCORD_${id}`;
+    saveDB();
 
-  const guild = await client.guilds.fetch(process.env.GUILD_ID);
-  await updateFinalRole(guild, id, m.plan);
+    const qr = await QRCode.toBuffer(
+      `BANK:${PAYMENT_VN.bankBin}|ACC:${PAYMENT_VN.accountNumber}|AMOUNT:${amount}|NOTE:${members[id].transferNote}`
+    );
 
-  i.reply({ content: 'Approved', ephemeral: true });
+    const embed = new EmbedBuilder()
+      .setTitle("🇻🇳 Thanh toán VNĐ")
+      .setDescription(
+        `💰 ${amount.toLocaleString()} VND\n👤 ${PAYMENT_VN.accountName}\n📝 ${members[id].transferNote}`
+      )
+      .setColor("#FFD700")
+      .setImage("attachment://qr.png");
+
+    return i.reply({
+      embeds: [embed],
+      files: [{ attachment: qr, name: 'qr.png' }],
+      ephemeral: true
+    });
+  }
+
+  /* ===== PAY JP ===== */
+  if (i.customId === 'pay_jp') {
+    const amount = PRICE_JP[members[id].plan];
+    members[id].currency = 'JP';
+    saveDB();
+
+    const embed = new EmbedBuilder()
+      .setTitle("🇯🇵 Thanh toán JPY")
+      .addFields(
+        { name: "Số tiền", value: `${amount} JPY` },
+        { name: "Ngân hàng", value: PAYMENT_JP.bankName },
+        { name: "STK", value: PAYMENT_JP.accountNumber }
+      )
+      .setColor("#4CAF50");
+
+    return i.reply({ embeds: [embed], ephemeral: true });
+  }
+
+  /* ===== APPROVE ===== */
+  if (i.customId.startsWith('approve_')) {
+    const uid = i.customId.split('_')[1];
+    const m = members[uid];
+
+    const now = Date.now();
+
+    m.expireAt = m.expireAt > now
+      ? addMonths(m.expireAt, planToMonth(m.plan))
+      : addMonths(now, planToMonth(m.plan));
+
+    m.remind23 = false;
+    saveDB();
+
+    const guild = await client.guilds.fetch(process.env.GUILD_ID);
+    await updateFinalRole(guild, uid, m.plan);
+
+    return i.reply({ content: '✅ Approved', ephemeral: true });
+  }
 });
 
 /* ================= REMINDER ================= */
@@ -234,64 +281,91 @@ setInterval(async () => {
 
   const now = new Date();
 
-  for (const id in members) {
+  if (!members._system) members._system = {};
+  const key = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
 
-    const m = members[id];
-    if (!m.expireAt) continue;
+  if (now.getDate() === 23 && members._system.last23 !== key) {
 
-    const expire = new Date(m.expireAt);
+    members._system.last23 = key;
+    saveDB();
 
-    if (
-      expire.getMonth() === now.getMonth() &&
-      expire.getFullYear() === now.getFullYear()
-    ) {
+    const guild = await client.guilds.fetch(process.env.GUILD_ID);
+    const list = await guild.members.fetch();
 
-      /* ngày 23 */
-      if (now.getDate() === 23 && !m.remind23) {
+    for (const m of list.values()) {
+      try {
+        if (m.user.bot) continue;
+        if (m.roles.cache.has(process.env.VIP_ROLE_ID)) continue;
 
-        const user = await client.users.fetch(id).catch(() => null);
-        if (user) user.send('🔔 Sắp hết hạn!');
+        await m.send({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle("⚠️ Sắp hết hạn VIP")
+              .setDescription("Gói thành viên của bạn sắp hết hạn rồi, Bạn gia hạn để tiếp tục sử dụng các dịch vụ nhé!")
+              .setColor("#FFA000")
+          ],
+          components: [
+            new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId('1m').setLabel('Gia hạn 1M').setStyle(ButtonStyle.Primary),
+              new ButtonBuilder().setCustomId('6m').setLabel('Gia hạn 6M').setStyle(ButtonStyle.Success),
+              new ButtonBuilder().setCustomId('1y').setLabel('Gia hạn 1Y').setStyle(ButtonStyle.Danger)
+            )
+          ]
+        });
 
-        m.remind23 = true;
-        saveDB();
-      }
-
-      /* ngày 25 */
-      if (now.getDate() === 25 && !m.remind25) {
-
-        const user = await client.users.fetch(id).catch(() => null);
-
-        if (user) {
-          const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('1m').setLabel('1m').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('6m').setLabel('6m').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('1y').setLabel('1y').setStyle(ButtonStyle.Primary)
-          );
-
-          user.send({ content: 'Gia hạn:', components: [row] });
-        }
-
-        m.remind25 = true;
-        saveDB();
-      }
-
+        await new Promise(r => setTimeout(r, 300));
+      } catch {}
     }
-
   }
 
-}, 60 * 60 * 1000);
+}, 3600000);
 
-/* ================= LOGIN ================= */
+/* ================= DASHBOARD ================= */
+app.get('/dashboard', async (req, res) => {
 
-console.log("👉 BEFORE LOGIN");
+  let totalVN = 0, totalJP = 0;
+  let active = 0, expired = 0;
+  const now = Date.now();
 
-client.login(process.env.TOKEN)
-  .then(() => console.log("🚀 LOGIN SUCCESS"))
-  .catch(err => console.error("❌ LOGIN ERROR:", err));
+  let rows = "";
 
-console.log("👉 AFTER LOGIN");
+  for (const id in members) {
+    if (id === '_system') continue;
 
-/* ================= KEEP ALIVE ================= */
-require('http')
-  .createServer((_, res) => res.end('OK'))
-  .listen(process.env.PORT || 3000);
+    const m = members[id];
+
+    if (m.plan && m.currency === 'VN') totalVN += PRICE_VN[m.plan] || 0;
+    if (m.plan && m.currency === 'JP') totalJP += PRICE_JP[m.plan] || 0;
+
+    if (m.expireAt && m.expireAt > now) active++;
+    else expired++;
+
+    let username = id, avatar = "";
+    try {
+      const user = await client.users.fetch(id);
+      username = user.username;
+      avatar = user.displayAvatarURL();
+    } catch {}
+
+    rows += `
+      <tr>
+        <td><img src="${avatar}" width="30"/> ${username}</td>
+        <td>${m.plan || '-'}</td>
+        <td>${m.expireAt ? new Date(m.expireAt).toLocaleDateString() : '-'}</td>
+      </tr>
+    `;
+  }
+
+  res.send(`
+  <html><body style="background:#0f172a;color:#fff;font-family:sans-serif">
+  <h1>Dashboard</h1>
+  VN: ${totalVN} | JP: ${totalJP} <br>
+  Active: ${active} | Expired: ${expired}
+  <table border="1" width="100%">${rows}</table>
+  </body></html>
+  `);
+});
+
+/* ================= START ================= */
+app.listen(PORT, () => console.log("🌐 Dashboard running"));
+client.login(process.env.TOKEN);
