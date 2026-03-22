@@ -112,7 +112,7 @@ async function updateFinalRole(guild, userId, plan) {
 }
 
 /* ================= READY ================= */
-client.once('ready', () => {
+client.once(Events.ClientReady, () => {
   console.log(`✅ Bot ready: ${client.user.tag}`);
 });
 
