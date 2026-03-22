@@ -19,6 +19,7 @@
     "node-fetch": "^3.3.2",
     "vietqr": "^1.0.2",
      "node-fetch": "^3.3.2",
+    "node-cron": "^3.0.2",
     "qrcode": "^1.5.4",
     "xlsx": "^0.18.5"
   }
