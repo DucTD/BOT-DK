@@ -1,5 +1,5 @@
 require('dotenv').config();
-
+const cron = require('node-cron');
 /* ================= IMPORT ================= */
 const {
   Client,
@@ -128,7 +128,6 @@ async function removeExpiredRole(guild, userId) {
 /* ================= READY ================= */
 client.once(Events.ClientReady, () => {
   console.log(`✅ Bot ready: ${client.user.tag}`);
-  runReminders(); // check ngay khi start
 });
 
 /* ================= MENU + BILL ================= */
@@ -322,7 +321,8 @@ client.on(Events.InteractionCreate, async i => {
 });
 
 /* ================= REMINDER ================= */
-async function runReminders() {
+// Cron job gửi nhắc nhở lúc 10:00 sáng giờ Việt Nam
+cron.schedule('0 10 * * *', async () => {
   const now = new Date();
   const nowTime = Date.now();
   if (!members._system) members._system = {};
@@ -399,10 +399,9 @@ async function runReminders() {
       }
     }
   }
-}
-
-// Reminder mỗi 1 giờ
-setInterval(runReminders, 3600000);
+}, {
+  timezone: 'Asia/Ho_Chi_Minh' // Giờ Việt Nam
+});
 
 /* ================= DASHBOARD ================= */
 app.get('/dashboard', async (req, res) => {
