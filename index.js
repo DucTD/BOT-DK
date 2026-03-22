@@ -11,17 +11,58 @@ const {
   Events,
   EmbedBuilder
 } = require('discord.js');
+// === EXPRESS SERVER ===
 const express = require('express');
-const app = express();
-const PORT = process.env.PORT || 8080; // Railway dùng biến môi trường PORT
+const app = express(); // chỉ khai báo 1 lần
 
+const PORT = process.env.PORT || 8080;
+
+// Route gốc để kiểm tra server
 app.get('/', (req, res) => {
   res.send('Bot đang chạy! 🎉');
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+// Dashboard hiển thị thành viên
+app.get('/dashboard', async (req, res) => {
+  let totalVN = 0, totalJP = 0;
+  let active = 0, expired = 0;
+  const now = Date.now();
+  let rows = "";
+
+  for (const id in members) {
+    if (id === '_system') continue;
+    const m = members[id];
+
+    if (m.plan && m.currency === 'VN') totalVN += PRICE_VN[m.plan] || 0;
+    if (m.plan && m.currency === 'JP') totalJP += PRICE_JP[m.plan] || 0;
+
+    if (m.expireAt && m.expireAt > now) active++;
+    else expired++;
+
+    const username = m.username || id;
+    const avatar = m.avatar || '';
+
+    rows += `
+      <tr>
+        <td><img src="${avatar}" width="30"/> ${username}</td>
+        <td>${m.plan || '-'}</td>
+        <td>${m.expireAt ? new Date(m.expireAt).toLocaleDateString() : '-'}</td>
+      </tr>
+    `;
+  }
+
+  res.send(`
+  <html><body style="background:#0f172a;color:#fff;font-family:sans-serif">
+  <h1>Dashboard</h1>
+  VN: ${totalVN} | JP: ${totalJP} <br>
+  Active: ${active} | Expired: ${expired}
+  <table border="1" width="100%">${rows}</table>
+  </body></html>
+  `);
 });
+
+// Không khai báo app.listen lần nữa nếu đã có
+app.listen(PORT, () => console.log(`🌐 Dashboard running on port ${PORT}`));
 const fs = require('fs');
 const QRCode = require('qrcode');
 const { createQR } = require('vietqr'); // VietQR EMV QR code
@@ -29,8 +70,8 @@ const fetch = (...args) =>
   import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 /* ================= APP ================= */
-const app = express();
-const PORT = process.env.PORT || 3000;
+//const app = express();
+//const PORT = process.env.PORT || 3000;
 
 /* ================= DATABASE ================= */
 const DB_FILE = './members.json';
@@ -413,47 +454,9 @@ cron.schedule('0 10 * * *', async () => {
   timezone: 'Asia/Ho_Chi_Minh' // Giờ Việt Nam
 });
 
-/* ================= DASHBOARD ================= */
-app.get('/dashboard', async (req, res) => {
-  let totalVN = 0, totalJP = 0;
-  let active = 0, expired = 0;
-  const now = Date.now();
-  let rows = "";
 
-  for (const id in members) {
-    if (id === '_system') continue;
-    const m = members[id];
-
-    if (m.plan && m.currency === 'VN') totalVN += PRICE_VN[m.plan] || 0;
-    if (m.plan && m.currency === 'JP') totalJP += PRICE_JP[m.plan] || 0;
-
-    if (m.expireAt && m.expireAt > now) active++;
-    else expired++;
-
-    const username = m.username || id;
-    const avatar = m.avatar || '';
-
-    rows += `
-      <tr>
-        <td><img src="${avatar}" width="30"/> ${username}</td>
-        <td>${m.plan || '-'}</td>
-        <td>${m.expireAt ? new Date(m.expireAt).toLocaleDateString() : '-'}</td>
-      </tr>
-    `;
-  }
-
-  res.send(`
-  <html><body style="background:#0f172a;color:#fff;font-family:sans-serif">
-  <h1>Dashboard</h1>
-  VN: ${totalVN} | JP: ${totalJP} <br>
-  Active: ${active} | Expired: ${expired}
-  <table border="1" width="100%">${rows}</table>
-  </body></html>
-  `);
-});
 
 /* ================= START ================= */
-app.listen(PORT, () => console.log("🌐 Dashboard running"));
 client.login(process.env.TOKEN);
 
 process.on('unhandledRejection', err => console.error('❌ Unhandled Rejection:', err.stack || err));
