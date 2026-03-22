@@ -198,6 +198,28 @@ client.on(Events.InteractionCreate, async i => {
   if (!i.isButton()) return;
 
   const id = i.user.id;
+  if (i.customId === 'check') {
+  const m = members[id];
+
+  if (!m || !m.expireAt) {
+    return i.reply({
+      content: "❌ Bạn chưa có gói thành viên.",
+      ephemeral: true
+    });
+  }
+
+  const date = new Date(m.expireAt).toLocaleDateString();
+
+  return i.reply({
+    embeds: [
+      new EmbedBuilder()
+        .setTitle("📅 Thông tin gói của bạn")
+        .setDescription(`Hạn sử dụng: **${date}**`)
+        .setColor("#5865F2")
+    ],
+    ephemeral: true
+  });
+}
   if (!members[id]) members[id] = { expireAt: 0 };
 
   /* ===== CHỌN GÓI ===== */
@@ -265,6 +287,11 @@ client.on(Events.InteractionCreate, async i => {
   /* ===== APPROVE ===== */
   if (i.customId.startsWith('approve_')) {
     const uid = i.customId.split('_')[1];
+
+if (!members[uid]) {
+  return i.reply({ content: "❌ User không tồn tại", ephemeral: true });
+}
+
     const m = members[uid];
 
     const now = Date.now();
@@ -303,6 +330,7 @@ setInterval(async () => {
       try {
         if (m.user.bot) continue;
         if (m.roles.cache.has(process.env.VIP_ROLE_ID)) continue;
+        if (m.roles.cache.has(process.env.ADMIN_ROLE_ID)) continue;
 
         await m.send({
           embeds: [
@@ -320,7 +348,7 @@ setInterval(async () => {
           ]
         });
 
-        await new Promise(r => setTimeout(r, 300));
+        await new Promise(r => setTimeout(r, 800));
       } catch {}
     }
   }
