@@ -347,7 +347,7 @@ cron.schedule('0 10 * * *', async () => {
         await m.send({
           embeds: [
             new EmbedBuilder()
-              .setTitle("⚠️ Sắp hết hạn VIP")
+              .setTitle("⚠️ Sắp hết hạn gói VIP")
               .setDescription("Gói thành viên của bạn sắp hết hạn rồi, bạn gia hạn trước ngày 25 nhé!")
               .setColor("#FFA000")
           ]
@@ -376,7 +376,7 @@ cron.schedule('0 10 * * *', async () => {
           embeds: [
             new EmbedBuilder()
               .setTitle("⏰ HẠN CHÓT GIA HẠN VIP")
-              .setDescription("🚨 Hôm nay là ngày cuối! Bạn chưa gia hạn VIP, vui lòng gia hạn ngay trước khi bị xóa quyền vào ngày 27.")
+              .setDescription("🚨 Hôm nay là hạn cuối để bạn gia hạn gói VIP! Vui lòng gia hạn ngay trước khi bị xóa quyền vào ngày 27.")
               .setColor("#FF0000")
           ]
         }).catch(() => {});
