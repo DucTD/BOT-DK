@@ -12,6 +12,16 @@ const {
   EmbedBuilder
 } = require('discord.js');
 const express = require('express');
+const app = express();
+const PORT = process.env.PORT || 8080; // Railway dùng biến môi trường PORT
+
+app.get('/', (req, res) => {
+  res.send('Bot đang chạy! 🎉');
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
 const fs = require('fs');
 const QRCode = require('qrcode');
 const { createQR } = require('vietqr'); // VietQR EMV QR code
