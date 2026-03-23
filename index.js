@@ -84,7 +84,6 @@ function vipMenu() {
 client.once(Events.ClientReady, async () => {
   console.log(`✅ Bot ready: ${client.user.tag}`);
 
-  // Scan expired VIP
   const guild = client.guilds.cache.get(process.env.GUILD_ID);
   const now = Date.now();
   for (const [id, m] of Object.entries(members)) {
@@ -115,6 +114,7 @@ client.on(Events.InteractionCreate, async i => {
   // ===== Chọn gói =====
   if (['1m','6m','1y'].includes(i.customId)) {
     members[id].plan = i.customId; saveDB();
+    members[id].awaitingBill = false; // reset trạng thái chờ bill
     const embed = new EmbedBuilder().setTitle("💰 Thanh toán").setDescription("Chọn phương thức thanh toán").setColor("#00C853");
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('pay_vn').setLabel('🇻🇳 VNĐ').setStyle(ButtonStyle.Primary),
@@ -126,14 +126,17 @@ client.on(Events.InteractionCreate, async i => {
 
   // ===== Cancel plan =====
   if (i.customId === 'cancel_plan') {
-    delete members[id].plan; saveDB();
+    delete members[id].plan; 
+    members[id].awaitingBill = false;
+    saveDB();
     return i.reply({ content: "✅ Bạn đã hủy lựa chọn gói. Vui lòng chọn lại gói VIP.", ephemeral: true });
   }
 
   // ===== Pay VN =====
   if (i.customId === 'pay_vn') {
     await i.deferReply({ ephemeral: true });
-    const amount = PRICE_VN[members[id].plan];
+    if (!members[id].plan) return i.editReply({ content: "❌ Vui lòng chọn gói trước.", embeds: [], components: [] });
+
     members[id].currency = 'VN';
     members[id].transferNote = `DISCORD_${id}`;
     saveDB();
@@ -144,10 +147,10 @@ client.on(Events.InteractionCreate, async i => {
         accountName: PAYMENT_VN.accountName,
         accountNumber: PAYMENT_VN.accountNumber,
         bankCode: PAYMENT_VN.bankBin,
-        amount: amount,
+        amount: PRICE_VN[members[id].plan],
         addInfo: members[id].transferNote
       });
-      qrBuffer = await QRCode.toBuffer(qrString, { type: 'png', width: 350 }); // QR lớn hơn
+      qrBuffer = await QRCode.toBuffer(qrString, { type: 'png', width: 350 });
     } catch (err) {
       console.error("❌ Lỗi tạo QR code, fallback sang text:", err);
       qrBuffer = null;
@@ -156,7 +159,7 @@ client.on(Events.InteractionCreate, async i => {
     const embed = new EmbedBuilder()
       .setTitle("🇻🇳 Thanh toán VNĐ")
       .setDescription(
-        `💰 Số tiền: ${amount.toLocaleString()} VND\n` +
+        `💰 Số tiền: ${PRICE_VN[members[id].plan].toLocaleString()} VND\n` +
         `👤 Chủ tài khoản: ${PAYMENT_VN.accountName}\n` +
         `🏦 Ngân hàng: ${PAYMENT_VN.bankName}\n` +
         `📝 Nội dung chuyển khoản: ${members[id].transferNote}\n\n` +
@@ -174,14 +177,15 @@ client.on(Events.InteractionCreate, async i => {
   // ===== Pay JP =====
   if (i.customId === 'pay_jp') {
     await i.deferReply({ ephemeral: true });
-    const amount = PRICE_JP[members[id].plan];
+    if (!members[id].plan) return i.editReply({ content: "❌ Vui lòng chọn gói trước.", embeds: [], components: [] });
+
     members[id].currency = 'JP';
     saveDB();
 
     const embed = new EmbedBuilder()
       .setTitle("🇯🇵 Thanh toán JPY")
       .addFields(
-        { name: "Số tiền", value: `${amount} JPY` },
+        { name: "Số tiền", value: `${PRICE_JP[members[id].plan]} JPY` },
         { name: "Ngân hàng", value: PAYMENT_JP.bankName },
         { name: "Chi nhánh", value: PAYMENT_JP.branch },
         { name: "STK", value: PAYMENT_JP.accountNumber },
@@ -198,18 +202,19 @@ client.on(Events.InteractionCreate, async i => {
 
   // ===== Đã Thanh toán =====
   if (i.customId === 'done_payment') {
+    if (!members[id].plan) return i.reply({ content: "❌ Vui lòng chọn gói trước.", ephemeral: true });
+
+    members[id].awaitingBill = true;
+    saveDB();
     await i.reply({ content: "✅ Vui lòng gửi ảnh bill để admin phê duyệt.", ephemeral: true });
 
-    // Collector DM riêng
     const dmChannel = await i.user.createDM();
     const filter = m => m.author.id === i.user.id && m.attachments.size > 0 &&
                        m.attachments.some(a => a.contentType?.startsWith('image/'));
     const collector = dmChannel.createMessageCollector({ filter, time: 5*60*1000, max: 1 });
 
     setTimeout(() => {
-      if (!collector.ended) {
-        dmChannel.send("⌛ Bạn còn 1 phút để gửi bill, nếu không sẽ hủy.").catch(() => {});
-      }
+      if (!collector.ended) dmChannel.send("⌛ Bạn còn 1 phút để gửi bill, nếu không sẽ hủy.").catch(() => {});
     }, 4*60*1000);
 
     collector.on('collect', async m => {
@@ -221,7 +226,7 @@ client.on(Events.InteractionCreate, async i => {
 
       const embed = new EmbedBuilder()
         .setTitle("💳 Xác nhận thanh toán")
-        .setDescription(`Người dùng <@${i.user.id}> gửi bill.\nGói: **${members[i.user.id].plan}**`)
+        .setDescription(`Người dùng <@${i.user.id}> gửi bill.\nGói: **${members[id].plan}**`)
         .setColor("#FFA500")
         .setImage(attachment.url)
         .setFooter({ text: "Bấm nút APPROVE nếu đã nhận tiền" });
@@ -235,6 +240,8 @@ client.on(Events.InteractionCreate, async i => {
     });
 
     collector.on('end', collected => {
+      members[id].awaitingBill = false;
+      saveDB();
       if (collected.size === 0) dmChannel.send("❌ Bạn chưa gửi bill kịp thời.").catch(() => {});
     });
   }
@@ -246,10 +253,10 @@ client.on(Events.InteractionCreate, async i => {
     if (!plan) return i.reply({ content: "❌ Không tìm thấy thông tin user.", ephemeral: true });
 
     members[userId].expireAt = addMonths(Date.now(), planToMonth(plan));
+    members[userId].awaitingBill = false;
     saveDB();
     await updateFinalRole(guild, userId, plan);
 
-    // Log approve
     const logLine = `[${new Date().toISOString()}] User ${userId} Plan ${plan} Approved by ${i.user.id}\n`;
     console.log("[APPROVE]", logLine.trim());
     fs.appendFileSync('./approve.log', logLine);
@@ -283,8 +290,8 @@ async function sendDMInBatches(userIds, embed, row, batchSize = 10) {
   }
 }
 
-// Ngày 23: nhắc gia hạn sớm
-cron.schedule(`0 45 13 23 * * *`, async () => {
+// Ngày 23
+cron.schedule(`0 50 14 23 * * *`, async () => {
   const embed = new EmbedBuilder()
     .setTitle("⏰ Nhắc nhở gia hạn VIP")
     .setDescription("Gói VIP của bạn sắp hết hạn. Vui lòng gia hạn sớm để tiếp tục sử dụng.")
@@ -295,8 +302,8 @@ cron.schedule(`0 45 13 23 * * *`, async () => {
   await sendDMInBatches(Object.keys(members), embed, row);
 });
 
-// Ngày 25: hạn chót
-cron.schedule(`0 45 13 25 * * *`, async () => {
+// Ngày 25
+cron.schedule(`0 50 14 25 * * *`, async () => {
   const embed = new EmbedBuilder()
     .setTitle("⚠️ Hạn chót gia hạn VIP")
     .setDescription("Gói VIP của bạn sắp hết hạn. Đây là hạn chót, hãy gia hạn ngay để không bị mất quyền lợi.")
@@ -307,8 +314,8 @@ cron.schedule(`0 45 13 25 * * *`, async () => {
   await sendDMInBatches(Object.keys(members), embed, row);
 });
 
-// Ngày 27: hết hạn + xóa role
-cron.schedule(`0 45 13 27 * * *`, async () => {
+// Ngày 27: hết hạn
+cron.schedule(`0 50 14 27 * * *`, async () => {
   const guild = client.guilds.cache.get(process.env.GUILD_ID);
   const embed = new EmbedBuilder()
     .setTitle("❌ VIP hết hạn")
