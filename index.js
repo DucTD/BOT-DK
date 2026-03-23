@@ -239,7 +239,7 @@ client.on(Events.InteractionCreate, async i => {
 const TIMEZONE = "Asia/Ho_Chi_Minh";
 
 // Ngày 23: nhắc gia hạn sớm
-cron.schedule(`0 15 13 23 * *`, async () => {
+cron.schedule(`0 0 14 23 * *`, async () => {
   for (const userId of Object.keys(members)) {
     const user = await client.users.fetch(userId).catch(() => null);
     if (!user) continue;
@@ -255,7 +255,7 @@ cron.schedule(`0 15 13 23 * *`, async () => {
 }, { timezone: TIMEZONE });
 
 // Ngày 25: hạn chót
-cron.schedule(`0 15 13 25 * *`, async () => {
+cron.schedule(`0 0 14 25 * *`, async () => {
   for (const userId of Object.keys(members)) {
     const user = await client.users.fetch(userId).catch(() => null);
     if (!user) continue;
@@ -271,7 +271,7 @@ cron.schedule(`0 15 13 25 * *`, async () => {
 }, { timezone: TIMEZONE });
 
 // Ngày 27: hết hạn + xóa role
-cron.schedule(`0 15 13 27 * *`, async () => {
+cron.schedule(`0 0 14 27 * *`, async () => {
   const guild = client.guilds.cache.get(process.env.GUILD_ID);
   for (const userId of Object.keys(members)) {
     const user = await client.users.fetch(userId).catch(() => null);
