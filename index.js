@@ -9,6 +9,8 @@ const { Pool } = require('pg');
 const QRCode = require('qrcode');
 const { createQR } = require('vietqr');
 const cron = require('node-cron');
+const express = require('express');
+const app = express();
 const joinCooldown = new Set();
 const TIMEZONE = 'Asia/Ho_Chi_Minh';
 const billLock = new Set();
@@ -60,7 +62,31 @@ async function upsertMember(id, data) {
     awaitingBill=$6, lastBill=$7, updatedAt=$8
   `, [id, fields.plan, fields.expireAt, fields.currency, fields.transferNote, fields.awaitingBill, fields.lastBill, fields.updatedAt]);
 }
+// ================= SYNC MEMBERS =================
+async function syncAllMembers() {
+  const guild = await client.guilds.fetch(process.env.GUILD_ID);
+  if (!guild) return;
 
+  console.log("🔄 Syncing members...");
+
+  const members = await guild.members.fetch();
+
+  const queries = [];
+
+  for (const [id] of members) {
+    queries.push(
+      pool.query(`
+        INSERT INTO members (id, updatedAt)
+        VALUES ($1,$2)
+        ON CONFLICT (id) DO NOTHING
+      `, [id, Date.now()])
+    );
+  }
+
+  await Promise.all(queries);
+
+  console.log(`✅ Synced ${queries.length} members`);
+}
 // ================= CONFIG =================
 const ROLE_BY_PLAN = {
   '1m': process.env.ROLE_1T_ID,
@@ -140,6 +166,7 @@ function vipMenu() {
 client.once(Events.ClientReady, async () => {
   console.log(`✅ Ready: ${client.user.tag}`);
   await initDB();
+  await syncAllMembers(); // 
 });
 // ================= NEW MEMBER DM =================
 client.on(Events.GuildMemberAdd, async member => {
@@ -488,6 +515,40 @@ await upsertMember(m.id, {
   const ids = expired.rows.map(r => r.id).filter(Boolean);
 await sendDMInBatches(ids, embed, row);
 }, { timezone: TIMEZONE });
+// ================= DASHBOARD =================
+app.get('/', async (req, res) => {
+  const total = await pool.query('SELECT COUNT(*) FROM members');
+  const vip = await pool.query(
+    'SELECT COUNT(*) FROM members WHERE expireAt > $1',
+    [Date.now()]
+  );
+  const waiting = await pool.query(
+    'SELECT COUNT(*) FROM members WHERE awaitingBill = true'
+  );
+
+  res.send(`
+    <h1>📊 Dashboard VIP</h1>
+    <p>Total members: ${total.rows[0].count}</p>
+    <p>VIP active: ${vip.rows[0].count}</p>
+    <p>Waiting bill: ${waiting.rows[0].count}</p>
+  `);
+});
+
+app.get('/list', async (req, res) => {
+  const data = await pool.query(
+    'SELECT * FROM members ORDER BY updatedAt DESC LIMIT 50'
+  );
+
+  res.send(`
+    <h1>📋 Member list</h1>
+    <pre>${JSON.stringify(data.rows, null, 2)}</pre>
+  `);
+});
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log(`🌐 Dashboard running on port ${PORT}`);
+});
 // ================= START BOT =================
 client.login(process.env.TOKEN);
 process.on('unhandledRejection', e => console.error('UnhandledRejection:', e));
