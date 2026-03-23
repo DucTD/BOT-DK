@@ -241,42 +241,63 @@ client.on(Events.InteractionCreate, async i => {
     return i.reply({ content: "Đã huỷ chọn gói", flags: 64 });
   }
 
-  // ===== PAY VN =====
-  if (i.customId === 'pay_vn') {
-    await i.deferReply({ flags: 64 });
-    const data = await getMember(id);
-    if (!data?.plan) return i.editReply("Chọn gói trước");
+ // ===== PAY VN =====
+if (i.customId === 'pay_vn') {
+  await i.deferReply({ flags: 64 });
+  const data = await getMember(id);
+  if (!data?.plan) return i.editReply("Chọn gói trước");
 
-    await upsertMember(id, { currency: 'VN', transferNote: id });
+  await upsertMember(id, { currency: 'VN', transferNote: id });
 
-    let qrBuffer = null;
-    try {
-      const qr = createQR({
-        accountName: PAYMENT_VN.accountName,
-        accountNumber: PAYMENT_VN.accountNumber,
-        bankCode: PAYMENT_VN.bankBin,
-        amount: PRICE_VN[data.plan],
-        addInfo: id
-      });
-      qrBuffer = await QRCode.toBuffer(qr);
-    } catch (e) {
-  console.log("QR error:", e);
+  return i.editReply({
+    embeds: [
+      new EmbedBuilder()
+        .setTitle("🇻🇳 Thanh toán VND")
+        .setColor("#00BCD4")
+        .setDescription(`
+💰 Số tiền: ${PRICE_VN[data.plan].toLocaleString()} VND
+🏦 Ngân hàng: ${PAYMENT_VN.bankName}
+💳 Số tài khoản: ${PAYMENT_VN.accountNumber}
+👤 Chủ tài khoản: ${PAYMENT_VN.accountName}
+📝 Nội dung chuyển khoản: Tên đầy đủ của bạn
+        `)
+    ],
+    components: [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('done_payment').setLabel('Đã thanh toán').setStyle(ButtonStyle.Success)
+      )
+    ]
+  });
 }
 
-    return i.editReply({
-      embeds: [
-        new EmbedBuilder()
-          .setTitle("🇻🇳 Thanh toán")
-          .setDescription(`💰 ${PRICE_VN[data.plan].toLocaleString()} VND\nND: ${id}`)
-      ],
-      files: qrBuffer ? [{ attachment: qrBuffer, name: 'qr.png' }] : [],
-      components: [
-        new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('done_payment').setLabel('Đã thanh toán').setStyle(ButtonStyle.Success)
-        )
-      ]
-    });
-  }
+// ===== PAY JP =====
+if (i.customId === 'pay_jp') {
+  await i.deferReply({ flags: 64 });
+  const data = await getMember(id);
+  if (!data?.plan) return i.editReply("Chọn gói trước");
+
+  await upsertMember(id, { currency: 'JP', transferNote: id });
+
+  return i.editReply({
+    embeds: [
+      new EmbedBuilder()
+        .setTitle("🇯🇵 Thanh toán JPY")
+        .setColor("#4CAF50")
+        .setDescription(`
+💰 Số tiền: ${PRICE_JP[data.plan].toLocaleString()} ¥
+🏦 Ngân hàng: ${PAYMENT_JP.bankName} - ${PAYMENT_JP.branch}
+💳 Số tài khoản: ${PAYMENT_JP.accountNumber}
+👤 Chủ tài khoản: ${PAYMENT_JP.accountName}
+📝 Nội dung chuyển khoản: Tên đầy đủ của bạn
+        `)
+    ],
+    components: [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('done_payment').setLabel('Đã thanh toán').setStyle(ButtonStyle.Success)
+      )
+    ]
+  });
+}
 
   // ===== DONE PAYMENT =====
     if (i.customId === 'done_payment') {
