@@ -299,113 +299,110 @@ if (i.customId === 'pay_jp') {
   });
 }
 
-  // ===== DONE PAYMENT =====
-    if (i.customId === 'done_payment') {
-
+// ===== DONE PAYMENT =====
+if (i.customId === 'done_payment') {
+  const id = i.user.id;
   const data = await getMember(id);
 
-  if (data?.awaitingBill === true) {
-  return i.reply({ content: "Bạn đã gửi yêu cầu rồi", flags: 64 });
-}
+  if (!data?.plan) return i.reply({ content: "Chọn gói trước", flags: 64 });
 
-  // ✅ check lock TRƯỚC
-if (billLock.has(id)) {
-  return i.reply({ content: "Bạn đang gửi yêu cầu, vui lòng chờ", flags: 64 });
-}
+  // ✅ Check lock trước
+  if (billLock.has(id)) {
+    return i.reply({ content: "Bạn đang gửi yêu cầu, vui lòng chờ", flags: 64 });
+  }
+  billLock.add(id);
+  setTimeout(() => billLock.delete(id), 300000); // 5 phút lock
 
-billLock.add(id);
-setTimeout(() => billLock.delete(id), 300000);
+  // Mark awaitingBill để tránh spam
+  await upsertMember(id, { awaitingBill: true });
 
-await upsertMember(id, { awaitingBill: true });
-  const member = await guild.members.fetch(id).catch(()=>null);
-  if (member && WAIT_ROLE_ID) {
-    await member.roles.add(WAIT_ROLE_ID).catch(()=>{});
+  // Thêm WAIT_ROLE nếu có
+  const guild = await client.guilds.fetch(process.env.GUILD_ID).catch(() => null);
+  if (guild && WAIT_ROLE_ID) {
+    const member = await guild.members.fetch(id).catch(() => null);
+    if (member) await member.roles.add(WAIT_ROLE_ID).catch(() => {});
   }
 
-await i.reply({ content: "Gửi bill qua DM", flags: 64 }).catch(async () => {
-  await i.followUp({ content: "Gửi bill qua DM", flags: 64 });
-});
+  await i.reply({ content: "📤 Hãy gửi bill qua DM (file hình ảnh)", flags: 64 }).catch(async () => {
+    await i.followUp({ content: "📤 Hãy gửi bill qua DM (file hình ảnh)", flags: 64 });
+  });
+
+  // ===== Collector =====
+  if (!client._collectors) client._collectors = {};
+  if (client._collectors[id]) client._collectors[id].stop();
 
   const dm = await i.user.createDM();
+  const collector = dm.createMessageCollector({
+    filter: m => m.attachments.size > 0,
+    time: 300000, // 5 phút
+    max: 1
+  });
 
-// ===== FIX: chống nhiều collector =====
-if (!client._collectors) client._collectors = {};
-
-if (client._collectors[id]) {
-  client._collectors[id].stop();
-}
-
-const collector = dm.createMessageCollector({
-  filter: m => m.attachments.size > 0,
-  time: 300000,
-  max: 1
-});
-
-client._collectors[id] = collector;
+  client._collectors[id] = collector;
 
   collector.on('collect', async m => {
-    const latest = await getMember(id);
+    // Cập nhật lastBill, vẫn giữ awaitingBill = true
     await upsertMember(id, { lastBill: m.attachments.first().url });
+
     const embed = new EmbedBuilder()
       .setTitle("💳 Bill")
-      .setDescription(`<@${id}> - ${latest.plan}`)
+      .setDescription(`<@${id}> - ${data.plan}`)
       .setImage(m.attachments.first().url);
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`approve_${id}`).setLabel("Approve").setStyle(ButtonStyle.Success)
     );
 
-    const adminChannel = await guild.channels.fetch(process.env.ADMIN_CHANNEL_ID).catch(()=>null);
-
-    if (!adminChannel) {
-      console.log("❌ Không tìm thấy ADMIN_CHANNEL_ID");
-      return;
-    }
+    const adminChannel = await guild.channels.fetch(process.env.ADMIN_CHANNEL_ID).catch(() => null);
+    if (!adminChannel) return console.log("❌ Không tìm thấy ADMIN_CHANNEL_ID");
 
     await adminChannel.send({ embeds: [embed], components: [row] });
   });
-collector.on('end', async (collected) => {
-  delete client._collectors[id]; // ❗ cleanup
 
-  if (collected.size === 0) {
-    await upsertMember(id, { awaitingBill: false });
-    console.log(`⏰ Reset awaitingBill (no bill): ${id}`);
-  }
-});
-  return; // ✅ phải nằm trong đây
+  collector.on('end', async collected => {
+    delete client._collectors[id]; // cleanup
+    if (collected.size === 0) {
+      // Nếu không gửi bill, reset awaitingBill
+      await upsertMember(id, { awaitingBill: false });
+      console.log(`⏰ Reset awaitingBill (không gửi bill): ${id}`);
+    }
+  });
 }
 // ===== APPROVE =====
 if (i.customId.startsWith("approve_")) {
-  // ❗ CHECK ADMIN (FIX CRASH)
+  // Check admin role
   if (!i.member || !i.member.roles.cache.has(process.env.ADMIN_ROLE_ID)) {
     return i.reply({ content: "Không có quyền", flags: 64 });
   }
+
   const userId = i.customId.split("_")[1];
-const data = await getMember(userId);
-if (!data?.plan) {
-  return i.reply({ content: "No plan", flags: 64 });
-}
-// ✅ THÊM ĐOẠN NÀY NGAY DƯỚI
-if (!data?.awaitingBill) {
-  return i.reply({ content: "User chưa gửi bill", flags: 64 });
-}
+  const data = await getMember(userId);
+
+  if (!data?.plan) return i.reply({ content: "User chưa chọn gói", flags: 64 });
+
+  // ✅ FIX: kiểm tra dựa trên lastBill, không dùng awaitingBill
+  if (!data?.lastBill) return i.reply({ content: "User chưa gửi bill", flags: 64 });
+
   const now = Date.now();
   const base = data.expireAt && data.expireAt > now ? data.expireAt : now;
   const expire = addMonths(base, planToMonth(data.plan));
 
   await upsertMember(userId, {
     expireAt: expire,
-    awaitingBill: false
+    awaitingBill: false,  // reset
+    lastBill: null        // reset
   });
 
-  const member = await guild.members.fetch(userId).catch(()=>null);
-
-  if (member) {
-    await member.roles.remove(Object.values(ROLE_BY_PLAN)).catch(()=>{});
-    await member.roles.add(ROLE_BY_PLAN[data.plan]).catch(()=>{});
-
-    if (WAIT_ROLE_ID) {
-      await member.roles.remove(WAIT_ROLE_ID).catch(()=>{});
+  const guild = await client.guilds.fetch(process.env.GUILD_ID).catch(() => null);
+  if (guild) {
+    const member = await guild.members.fetch(userId).catch(() => null);
+    if (member) {
+      // Remove role cũ + add role mới
+      await Promise.all([
+        ...Object.values(ROLE_BY_PLAN).map(r => member.roles.remove(r).catch(() => {})),
+        WAIT_ROLE_ID ? member.roles.remove(WAIT_ROLE_ID).catch(() => {}) : null
+      ]);
+      await member.roles.add(ROLE_BY_PLAN[data.plan]).catch(() => {});
     }
   }
 
@@ -419,6 +416,8 @@ if (!data?.awaitingBill) {
 });
 
 // ================= CRON REMINDERS 23/25/27 =================
+
+// Hàm gửi DM theo batch
 async function sendDMInBatches(userIds, embed, row, batchSize = 10) {
   const guild = await client.guilds.fetch(process.env.GUILD_ID).catch(()=>null);
   if (!guild) return;
@@ -429,14 +428,6 @@ async function sendDMInBatches(userIds, embed, row, batchSize = 10) {
     await Promise.all(batch.map(async id => {
       try {
         const user = await client.users.fetch(id);
-        const member = await guild.members.fetch(id).catch(() => null);
-if (!member) return;
-
-const data = await getMember(id);
-if (!data?.expireAt) return;
-
-const now = Date.now();
-if (data.expireAt < now) return;
         await user.send({ embeds: [embed], components: [row] });
         console.log(`✅ DM sent: ${id}`);
       } catch (err) {
@@ -444,12 +435,15 @@ if (data.expireAt < now) return;
       }
     }));
 
-    await new Promise(res => setTimeout(res, 2000));
+    await new Promise(res => setTimeout(res, 2000)); // tránh ratelimit
   }
 }
 
-// --- Ngày 23: nhắc gia hạn sớm ---
+// --- Ngày 23: Nhắc sớm VIP ---
 cron.schedule(`0 0 14 23 * *`, async () => {
+  const guild = await client.guilds.fetch(process.env.GUILD_ID).catch(()=>null);
+  if (!guild) return;
+
   const embed = new EmbedBuilder()
     .setTitle("⏰ Nhắc nhở gia hạn VIP")
     .setDescription("Gói VIP của bạn sắp hết hạn. Vui lòng gia hạn sớm để tiếp tục sử dụng.")
@@ -462,17 +456,33 @@ cron.schedule(`0 0 14 23 * *`, async () => {
       .setStyle(ButtonStyle.Primary)
   );
 
- const now = Date.now();
-const members = await pool.query(`
-  SELECT * FROM members
-  WHERE expireAt IS NOT NULL
-  AND expireAt BETWEEN $1 AND $2
-`, [now, now + 7 * 24 * 60 * 60 * 1000]); // trong 7 ngày tới
-  await sendDMInBatches(members.rows.map(r => r.id), embed, row);
+  const now = Date.now();
+  const upcoming = await pool.query(`
+    SELECT * FROM members
+    WHERE expireAt IS NOT NULL
+      AND expireAt > $1
+  `, [now]);
+
+  // Lọc bỏ user đang có VIP_ROLE_ID
+  const userIds = [];
+  for (const m of upcoming.rows) {
+    const member = await guild.members.fetch(m.id).catch(()=>null);
+    if (!member) continue;
+    if (!member.roles.cache.has(VIP_ROLE_ID)) {
+      userIds.push(m.id);
+      // Cập nhật lastReminder = 23
+      await upsertMember(m.id, { lastReminder: 23 });
+    }
+  }
+
+  await sendDMInBatches(userIds, embed, row);
 }, { timezone: TIMEZONE });
 
-// --- Ngày 25: hạn chót ---
+// --- Ngày 25: Hạn chót ---
 cron.schedule(`0 0 14 25 * *`, async () => {
+  const guild = await client.guilds.fetch(process.env.GUILD_ID).catch(()=>null);
+  if (!guild) return;
+
   const embed = new EmbedBuilder()
     .setTitle("⚠️ Hạn chót gia hạn VIP")
     .setDescription("Gói VIP của bạn sắp hết hạn. Đây là hạn chót, hãy gia hạn ngay để không bị mất quyền lợi.")
@@ -485,17 +495,23 @@ cron.schedule(`0 0 14 25 * *`, async () => {
       .setStyle(ButtonStyle.Primary)
   );
 
- const now = Date.now();
-const members = await pool.query(`
-  SELECT * FROM members
-  WHERE expireAt IS NOT NULL
-  AND expireAt BETWEEN $1 AND $2
-`, [now, now + 7 * 24 * 60 * 60 * 1000]); // trong 7 ngày tới
-  await sendDMInBatches(members.rows.map(r => r.id), embed, row);
+  const now = Date.now();
+  const members = await pool.query(`
+    SELECT * FROM members
+    WHERE lastReminder = 23
+      AND (awaitingBill IS NULL OR awaitingBill = false)
+      AND expireAt > $1
+  `, [now]);
+
+  const userIds = members.rows.map(r => r.id);
+  await sendDMInBatches(userIds, embed, row);
 }, { timezone: TIMEZONE });
 
-// --- Ngày 27: hết hạn + xóa role ---
+// --- Ngày 27: Hết hạn, xóa role ---
 cron.schedule(`0 0 14 27 * *`, async () => {
+  const guild = await client.guilds.fetch(process.env.GUILD_ID).catch(()=>null);
+  if (!guild) return;
+
   const embed = new EmbedBuilder()
     .setTitle("❌ VIP hết hạn")
     .setDescription("Gói VIP của bạn đã hết hạn. Quyền lợi sẽ bị tạm ngưng. Vui lòng gia hạn nếu muốn tiếp tục.")
@@ -508,33 +524,30 @@ cron.schedule(`0 0 14 27 * *`, async () => {
       .setStyle(ButtonStyle.Primary)
   );
 
-  const guild = await client.guilds.fetch(process.env.GUILD_ID).catch(()=>null);
-if (!guild) return;
   const now = Date.now();
-  const expired = await pool.query('SELECT * FROM members WHERE expireAt IS NOT NULL AND expireAt <= $1', [now]);
+  const expired = await pool.query(`
+    SELECT * FROM members
+    WHERE expireAt IS NOT NULL
+      AND expireAt <= $1
+  `, [now]);
 
+  const userIds = [];
   for (const m of expired.rows) {
-    const member = await guild.members.fetch(m.id).catch(() => null);
-  if (member) {
-  // ❗ remove role gói
-  for (const r of Object.values(ROLE_BY_PLAN)) {
-    await member.roles.remove(r).catch(() => {});
+    const member = await guild.members.fetch(m.id).catch(()=>null);
+    if (member) {
+      // Remove VIP role + WAIT role
+      for (const r of Object.values(ROLE_BY_PLAN)) {
+        await member.roles.remove(r).catch(()=>{});
+      }
+      if (WAIT_ROLE_ID) await member.roles.remove(WAIT_ROLE_ID).catch(()=>{});
+    }
+
+    // Reset plan + expireAt
+    await upsertMember(m.id, { plan: null, expireAt: null });
+    userIds.push(m.id);
   }
 
-  // ❗ remove WAIT
-  if (WAIT_ROLE_ID) {
-    await member.roles.remove(WAIT_ROLE_ID).catch(()=>{});
-  }
-}
-
-await upsertMember(m.id, {
-  plan: null,
-  expireAt: null
-});
-  }
-
-  const ids = expired.rows.map(r => r.id).filter(Boolean);
-await sendDMInBatches(ids, embed, row);
+  await sendDMInBatches(userIds, embed, row);
 }, { timezone: TIMEZONE });
 // ================= DASHBOARD =================
 app.get('/', async (req, res) => {
