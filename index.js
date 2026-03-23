@@ -275,21 +275,42 @@ if (i.customId === 'pay_vn') {
 });
   }
 
- // ================= APPROVE ADMIN + DM USER =================
+// ================= APPROVE ADMIN + DM USER (Fix not found user) =================
 if (i.customId.startsWith('approve_')) {
   const userId = String(i.customId.split('_')[1]);
   const memberData = await getMember(userId);
-  if (!memberData || !memberData.plan) 
-    return i.reply({ content: "❌ User chưa chọn gói VIP.", flags: 64 });
+
+  // Kiểm tra user trong DB
+  if (!memberData) {
+    await i.reply({ content: `❌ Không tìm thấy thông tin user ${userId} trong database. Vui lòng kiểm tra lại.`, flags: 64 });
+    return;
+  }
+
+  // Kiểm tra user đã chọn gói chưa
+  if (!memberData.plan) {
+    await i.reply({ content: "❌ User chưa chọn gói VIP.", flags: 64 });
+    return;
+  }
 
   const plan = memberData.plan;
   const newExpire = addMonths(Math.max(Date.now(), memberData.expireAt || 0), planToMonth(plan));
+
+  // Cập nhật expireAt + awaitingBill = false trong DB
   await upsertMember(userId, { expireAt: newExpire, awaitingBill: false });
 
   // --- Cập nhật role VIP ---
   const guild = client.guilds.cache.get(process.env.GUILD_ID);
-  const member = await guild.members.fetch(userId).catch(() => null);
-  if (member) await updateFinalRole(guild, userId, plan);
+  let member = null;
+  if (guild) {
+    member = await guild.members.fetch(userId).catch(() => null);
+  }
+
+  if (member) {
+    await updateFinalRole(guild, userId, plan);
+  } else {
+    // Nếu không tìm thấy member trong guild, log cho admin
+    console.log(`⚠️ Approve: user ${userId} không có trong guild, chỉ cập nhật DB expireAt.`);
+  }
 
   // --- Disable button trên message admin ---
   if (i.message.components.length > 0) {
@@ -300,9 +321,8 @@ if (i.customId.startsWith('approve_')) {
     await i.update({ content: null, embeds: [adminEmbed], components: i.message.components });
   }
 
-  // --- Gửi DM user với embed đẹp ---
-  const user = await client.users.fetch(userId).catch(() => null);
-  if (user) {
+  // --- Gửi DM user nếu có ---
+  if (member) {
     const expireDate = new Date(newExpire).toLocaleDateString('vi-VN');
     const embed = new EmbedBuilder()
       .setTitle("🎉 Kích hoạt VIP thành công!")
@@ -315,7 +335,9 @@ if (i.customId.startsWith('approve_')) {
       .setThumbnail("https://i.imgur.com/8QfQ3Vx.png") // icon VIP
       .setFooter({ text: "Hãy gia hạn trước ngày hết hạn để duy trì quyền lợi VIP" });
 
-    await user.send({ embeds: [embed] }).catch(() => {});
+    await member.user.send({ embeds: [embed] }).catch(() => {
+      console.log(`⚠️ Không thể gửi DM cho user ${userId}`);
+    });
   }
 }
 
