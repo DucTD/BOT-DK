@@ -193,7 +193,8 @@ client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
     });
     console.log(`🔄 Updated username: ${newMember.user.username}`);
   }
-});
+  });
+  client.on(Events.GuildMemberAdd, async member => {
   try {
     if (VIP_ROLE_ID && member.roles.cache.has(VIP_ROLE_ID)) return;
 
