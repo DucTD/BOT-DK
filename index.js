@@ -389,7 +389,7 @@ if (i.customId.startsWith("approve_")) {
   const data = await getMember(userId);
 
   if (!data?.plan) return i.followUp({ content: "User chưa chọn gói", flags: 64 });
-  if (!data?.lastBill) return i.followUp({ content: "User chưa gửi bill", flags: 64 });
+  if (!data?.awaitingBill) return i.followUp({ content: "User chưa gửi bill", flags: 64 });
 
   const now = Date.now();
   const base = data.expireAt && data.expireAt > now ? data.expireAt : now;
