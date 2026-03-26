@@ -477,7 +477,6 @@ if (member && data.plan) {
     // Gửi phản hồi cho admin
     await i.followUp({ content: `✅ Đã từ chối hóa đơn của <@${memberId}>. Yêu cầu đã bị hủy.` });
   }
-});
 
 // --- Hàm tiện ích chuyển gói thành số tháng ---
 function planToMonth(plan) {
