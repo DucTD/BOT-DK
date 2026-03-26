@@ -52,6 +52,10 @@ async function initDB() {
     ALTER TABLE members
     ADD COLUMN IF NOT EXISTS waitRoleId TEXT
   `);
+  await pool.query(`
+  ALTER TABLE members
+  ADD COLUMN IF NOT EXISTS username TEXT
+`);
 }
 
 async function getMember(id) {
@@ -72,16 +76,19 @@ async function upsertMember(id, data) {
     lastBill: data.lastBill ?? old?.lastBill ?? null,
     lastReminder: data.lastReminder ?? old?.lastReminder ?? null,
     waitRoleId: data.waitRoleId ?? old?.waitRoleId ?? null, // thêm dòng này
+    username: data.username ?? old?.username ?? null,
     updatedAt: now
   };
 
  await pool.query(`
-    INSERT INTO members (id, plan, expireAt, currency, transferNote, awaitingBill, lastBill, lastReminder, waitRoleId, updatedAt)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-    ON CONFLICT (id) DO UPDATE SET
-      plan=$2, expireAt=$3, currency=$4, transferNote=$5,
-      awaitingBill=$6, lastBill=$7, lastReminder=$8, waitRoleId=$9, updatedAt=$10
-  `, [id, fields.plan, fields.expireAt, fields.currency, fields.transferNote, fields.awaitingBill, fields.lastBill, fields.lastReminder, fields.waitRoleId, fields.updatedAt]);
+    INSERT INTO members (id, username, plan, expireAt, currency, transferNote, awaitingBill, lastBill, lastReminder, waitRoleId, updatedAt)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+ON CONFLICT (id) DO UPDATE SET
+  username=$2,
+  plan=$3, expireAt=$4, currency=$5, transferNote=$6,
+  awaitingBill=$7, lastBill=$8, lastReminder=$9, waitRoleId=$10, updatedAt=$11
+  `,[
+  id,fields.username,fields.plan,fields.expireAt,fields.currency,fields.transferNote,fields.awaitingBill,fields.lastBill,fields.lastReminder,fields.waitRoleId,fields.updatedAt]);
 }
 // ================= SYNC MEMBERS =================
 async function syncAllMembers() {
@@ -94,15 +101,15 @@ async function syncAllMembers() {
 
   const queries = [];
 
-  for (const [id] of members) {
-    queries.push(
-      pool.query(`
-        INSERT INTO members (id, updatedAt)
-        VALUES ($1,$2)
-        ON CONFLICT (id) DO NOTHING
-      `, [id, Date.now()])
-    );
-  }
+  for (const [id, member] of members) {
+  queries.push(
+    pool.query(`
+      INSERT INTO members (id, username, updatedAt)
+      VALUES ($1,$2,$3)
+      ON CONFLICT (id) DO UPDATE SET username=$2
+    `, [id, member.user.username, Date.now()])
+  );
+}
 
   await Promise.all(queries);
 
@@ -179,7 +186,14 @@ client.once(Events.ClientReady, async () => {
   await syncAllMembers(); // 
 });
 // ================= NEW MEMBER DM =================
-client.on(Events.GuildMemberAdd, async member => {
+client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
+  if (oldMember.user.username !== newMember.user.username) {
+    await upsertMember(newMember.id, {
+      username: newMember.user.username
+    });
+    console.log(`🔄 Updated username: ${newMember.user.username}`);
+  }
+});
   try {
     if (VIP_ROLE_ID && member.roles.cache.has(VIP_ROLE_ID)) return;
 
@@ -225,6 +239,8 @@ client.on(Events.InteractionCreate, async i => {
   if (!i.isButton()) return;
   if (!i.inGuild()) return;
   const id = i.user.id;
+  const username = i.user.globalName || i.user.username;
+await upsertMember(id, { username });
   const guildData = await client.guilds.fetch(process.env.GUILD_ID).catch(() => null);
   if (!guildData) return;
 
@@ -742,9 +758,9 @@ app.get('/admin', async (req, res) => {
   const values = [];
 
   if (q) {
-    values.push(`%${q}%`);
-    conditions.push(`id LIKE $${values.length}`);
-  }
+  values.push(`%${q}%`);
+  conditions.push(`(id LIKE $${values.length} OR username ILIKE $${values.length})`);
+}
 
   if (status === 'waiting') {
     conditions.push(`awaitingBill = true`);
@@ -786,7 +802,8 @@ app.get('/admin', async (req, res) => {
 
     ${data.rows.map(u => `
       <div style="border:1px solid #ccc;padding:10px;margin:10px">
-        <b>ID:</b> ${u.id} <br/>
+        <b>User:</b> ${u.username || 'Unknown'} <br/>
+        <b>ID:</b> ${u.id}
         <b>Plan:</b> ${u.plan || 'None'} <br/>
         <b>Status:</b> ${
           u.awaitingBill ? '🟡 Waiting bill' :
