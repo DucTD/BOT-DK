@@ -36,7 +36,7 @@ async function initDB() {
     CREATE TABLE IF NOT EXISTS members (
       id TEXT PRIMARY KEY,
       plan TEXT,
-      expireAt BIGINT,
+      expireat BIGINT,
       currency TEXT,
       transferNote TEXT,
       awaitingBill BOOLEAN DEFAULT false,
@@ -69,7 +69,7 @@ async function upsertMember(id, data) {
 
   const fields = {
     plan: data.plan ?? old?.plan ?? null,
-    expireAt: data.expireAt ?? old?.expireAt ?? null,
+    expireat: data.expireat ?? old?.expireat ?? null,
     currency: data.currency ?? old?.currency ?? null,
     transferNote: data.transferNote ?? old?.transferNote ?? null,
     awaitingBill: data.awaitingBill ?? old?.awaitingBill ?? false,
@@ -81,14 +81,14 @@ async function upsertMember(id, data) {
   };
 
  await pool.query(`
-    INSERT INTO members (id, username, plan, expireAt, currency, transferNote, awaitingBill, lastBill, lastReminder, waitRoleId, updatedAt)
+    INSERT INTO members (id, username, plan, expireat, currency, transferNote, awaitingBill, lastBill, lastReminder, waitRoleId, updatedAt)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 ON CONFLICT (id) DO UPDATE SET
   username=$2,
-  plan=$3, expireAt=$4, currency=$5, transferNote=$6,
+  plan=$3, expireat=$4, currency=$5, transferNote=$6,
   awaitingBill=$7, lastBill=$8, lastReminder=$9, waitRoleId=$10, updatedAt=$11
   `,[
-  id,fields.username,fields.plan,fields.expireAt,fields.currency,fields.transferNote,fields.awaitingBill,fields.lastBill,fields.lastReminder,fields.waitRoleId,fields.updatedAt]);
+  id,fields.username,fields.plan,fields.expireat,fields.currency,fields.transferNote,fields.awaitingBill,fields.lastBill,fields.lastReminder,fields.waitRoleId,fields.updatedAt]);
 }
 // ================= SYNC MEMBERS =================
 async function syncAllMembers() {
@@ -202,7 +202,7 @@ client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
     const now = Date.now();
 
     // đang có VIP → bỏ
-    if (data?.expireAt && data.expireAt > now) return;
+    if (data?.expireat && data.expireat > now) return;
 
     // anti spam
     if (joinCooldown.has(member.id)) return;
@@ -453,11 +453,11 @@ if (i.customId.startsWith('approve_')) {
   if (!member) return i.followUp({ content: "❌ Không tìm thấy user", ephemeral: true });
 
   const now = Date.now();
-  const base = data.expireAt && data.expireAt > now ? data.expireAt : now;
+  const base = data.expireat && data.expireat > now ? data.expireat : now;
   const expire = addMonths(base, planToMonth(data.plan));
 
   await upsertMember(memberId, {
-    expireAt: expire,
+    expireat: expire,
     awaitingBill: false,
     lastBill: null,
     waitRoleId: null
@@ -582,9 +582,9 @@ const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
 
 const upcoming = await pool.query(`
   SELECT * FROM members
-  WHERE expireAt IS NOT NULL
-    AND expireAt > $1
-    AND expireAt - $1 <= $2
+  WHERE expireat IS NOT NULL
+    AND expireat > $1
+    AND expireat - $1 <= $2
     AND (lastReminder IS NULL OR lastReminder < 23)
 `, [now, THIRTY_DAYS]);
 
@@ -642,7 +642,7 @@ cron.schedule(`0 0 14 25 * *`, async () => {
     SELECT * FROM members
     WHERE lastReminder = 23
       AND (awaitingBill IS NULL OR awaitingBill = false)
-      AND expireAt > $1
+      AND expireat > $1
   `, [now]);
 
   const userIds = [];
@@ -685,8 +685,8 @@ cron.schedule(`0 0 14 27 * *`, async () => {
   const now = Date.now();
   const expired = await pool.query(`
     SELECT * FROM members
-    WHERE expireAt IS NOT NULL
-      AND expireAt <= $1
+    WHERE expireat IS NOT NULL
+      AND expireat <= $1
   `, [now]);
 
   const userIds = [];
@@ -710,7 +710,7 @@ cron.schedule(`0 0 14 27 * *`, async () => {
 }
 
     // Reset DB
-    await upsertMember(m.id, { plan: null, expireAt: null });
+    await upsertMember(m.id, { plan: null, expireat: null });
 
     // ✅ thêm vào danh sách gửi DM
     userIds.push(m.id);
@@ -722,7 +722,7 @@ cron.schedule(`0 0 14 27 * *`, async () => {
 app.get('/', async (req, res) => {
   const total = await pool.query('SELECT COUNT(*) FROM members');
   const vip = await pool.query(
-    'SELECT COUNT(*) FROM members WHERE expireAt > $1',
+    'SELECT COUNT(*) FROM members WHERE expireat > $1',
     [Date.now()]
   );
   const waiting = await pool.query(
@@ -754,7 +754,7 @@ app.get('/admin', async (req, res) => {
   }
   const { q, status } = req.query;
 
-  let query = `SELECT id,username,plan,expireAt,currency,transferNote,awaitingBill,lastBill,updatedAt,lastReminder,waitRoleId FROM members`;
+  let query = `SELECT id,username,plan,expireat,currency,transferNote,awaitingBill,lastBill,updatedAt,lastReminder,waitRoleId FROM members`;
   const conditions = [];
   const values = [];
 
@@ -769,12 +769,12 @@ app.get('/admin', async (req, res) => {
 
   if (status === 'vip') {
     values.push(Date.now());
-    conditions.push(`expireAt > $${values.length}`);
+    conditions.push(`expireat > $${values.length}`);
   }
 
   if (status === 'expired') {
     values.push(Date.now());
-    conditions.push(`expireAt <= $${values.length}`);
+    conditions.push(`expireat <= $${values.length}`);
   }
 
   if (conditions.length > 0) {
@@ -808,7 +808,7 @@ app.get('/admin', async (req, res) => {
         <b>Plan:</b> ${u.plan || 'None'} <br/>
         <b>Status:</b> ${
           u.awaitingBill ? '🟡 Waiting bill' :
-          (u.expireAt && u.expireAt > Date.now() ? '🟢 VIP' : '🔴 Expired')
+          (u.expireat && u.expireat > Date.now() ? '🟢 VIP' : '🔴 Expired')
         } <br/>
         
         ${u.lastBill ? `<img src="${u.lastBill}" width="200"/><br/>` : ''}
@@ -834,11 +834,11 @@ app.get('/approve/:id', async (req, res) => {
   if (!member) return res.send("❌ User not found");
 
   const now = Date.now();
-  const base = data.expireAt && data.expireAt > now ? data.expireAt : now;
+  const base = data.expireat && data.expireat > now ? data.expireat : now;
   const expire = addMonths(base, planToMonth(data.plan));
 
   await upsertMember(memberId, {
-    expireAt: expire,
+    expireat: expire,
     awaitingBill: false,
     lastBill: null,
     waitRoleId: null
