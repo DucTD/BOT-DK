@@ -129,12 +129,6 @@ const PAYMENT_JP = {
   accountName: "グエンズイテイン"
 };
 
-const addMonths = (base, m) => {
-  const d = new Date(base);
-  d.setMonth(d.getMonth() + m);
-  return d.getTime();
-};
-
 // ================= CLIENT =================
 const client = new Client({
   intents: [
