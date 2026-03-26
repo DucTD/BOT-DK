@@ -135,8 +135,6 @@ const addMonths = (base, m) => {
   return d.getTime();
 };
 
-const planToMonth = p => (p === '6m' ? 6 : p === '1y' ? 12 : 1);
-
 // ================= CLIENT =================
 const client = new Client({
   intents: [
