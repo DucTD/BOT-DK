@@ -108,11 +108,6 @@ async function syncAllMembers() {
   console.log(`✅ Synced ${queries.length} members`);
 }
 // ================= CONFIG =================
-const ROLE_BY_PLAN = {
-  '1m': process.env.ROLE_1T_ID,
-  '6m': process.env.ROLE_6T_ID,
-  '1y': process.env.ROLE_1Y_ID
-};
 
 const VIP_ROLE_ID = process.env.VIP_ROLE_ID;
 const WAIT_ROLE_ID = process.env.WAIT_ROLE_ID;
