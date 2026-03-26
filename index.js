@@ -754,7 +754,7 @@ app.get('/admin', async (req, res) => {
   }
   const { q, status } = req.query;
 
-  let query = `SELECT * FROM members`;
+  let query = `SELECT id,username,plan,expireAt,currency,transferNote,awaitingBill,lastBill,updatedAt,lastReminder,waitRoleId FROM members`;
   const conditions = [];
   const values = [];
 
