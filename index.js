@@ -319,10 +319,13 @@ if (i.customId === 'done_payment') {
   await upsertMember(id, { awaitingBill: true });
 
   // Thêm WAIT_ROLE nếu có
-  if (guildData  && WAIT_ROLE_ID) {
-    const member = await guildData.members.fetch(id).catch(() => null);
-    if (member) await member.roles.add(WAIT_ROLE_ID).catch(() => {});
+  if (guildData) {
+  const member = await guildData.members.fetch(id).catch(() => null);
+  if (member && data.plan) {
+    const waitRoleId = WAIT_ROLE_BY_PLAN[data.plan];
+    if (waitRoleId) await member.roles.add(waitRoleId).catch(() => {});
   }
+}
 
   // DM yêu cầu gửi bill
   
@@ -377,8 +380,7 @@ if (i.customId === 'done_payment') {
 // ===== APPROVE BILL =====
 if (i.customId.startsWith("approve_")) {
   if (!i.inGuild()) return;
-  // defer ngay để tránh timeout
-  await i.deferUpdate();
+  await i.deferUpdate(); // tránh timeout
 
   // Check admin
   if (!i.member || !i.member.roles.cache.has(process.env.ADMIN_ROLE_ID)) {
@@ -389,40 +391,83 @@ if (i.customId.startsWith("approve_")) {
   const data = await getMember(userId);
 
   if (!data?.plan) return i.followUp({ content: "User chưa chọn gói", flags: 64 });
-  if (!data?.awaitingBill) return i.followUp({ content: "User chưa gửi bill", flags: 64 });
 
+  const guild = await client.guilds.fetch(process.env.GUILD_ID).catch(() => null);
+  if (!guild) return i.followUp({ content: "Không tìm thấy server", flags: 64 });
+
+  const member = await guild.members.fetch(userId).catch(() => null);
+  if (!member) return i.followUp({ content: "Không tìm thấy user trên server", flags: 64 });
+
+  // Tìm role chờ đang có
+  const waitingRole = Object.keys(WAIT_ROLE_BY_PLAN).find(r => member.roles.cache.has(WAIT_ROLE_BY_PLAN[r]));
+  if (!waitingRole) {
+    return i.followUp({ content: "User không đang chờ duyệt", flags: 64 });
+  }
+
+  // Tính hạn VIP mới
   const now = Date.now();
   const base = data.expireAt && data.expireAt > now ? data.expireAt : now;
   const expire = addMonths(base, planToMonth(data.plan));
 
+  // Update DB
   await upsertMember(userId, {
     expireAt: expire,
     awaitingBill: false,
     lastBill: null
   });
 
-  const guild = await client.guilds.fetch(process.env.GUILD_ID).catch(() => null);
-  if (guild) {
-    const member = await guild.members.fetch(userId).catch(() => null);
-    if (member) {
-      await Promise.all([
-        ...Object.values(ROLE_BY_PLAN).map(r => member.roles.remove(r).catch(() => {})),
-        WAIT_ROLE_ID ? member.roles.remove(WAIT_ROLE_ID).catch(() => {}) : null
-      ]);
+  // Remove tất cả role cũ + role chờ
+  await Promise.all([
+  // Xóa tất cả VIP role cũ
+  ...Object.values(ROLE_BY_PLAN).map(r => member.roles.remove(r).catch(() => {})),
 
-      await member.roles.add(ROLE_BY_PLAN[data.plan]).catch(() => {});
+  // Xóa tất cả role chờ
+  ...Object.values(WAIT_ROLE_BY_PLAN).map(r => member.roles.remove(r).catch(() => {}))
+]);
 
-      await member.send(
-        `🎉 Gói VIP ${data.plan} của bạn đã được duyệt!\nHạn đến: <t:${Math.floor(expire/1000)}:F>`
-      ).catch(() => {});
-    }
-  }
+  // Add role VIP tương ứng
+  await member.roles.add(ROLE_BY_PLAN[data.plan]).catch(() => {});
 
-  // update message sau khi xử lý xong
+  // Gửi DM
+  await member.send(
+    `🎉 Gói VIP ${data.plan} của bạn đã được duyệt!\nHạn đến: <t:${Math.floor(expire/1000)}:F>`
+  ).catch(() => {});
+
+  // Update interaction message
   await i.editReply({
-  content: `✅ Approved <@${userId}>`,
-  components: []
-});
+    content: `✅ Approved <@${userId}>`,
+    components: []
+  });
+}
+
+// --- Cấu hình role mapping ---
+const WAIT_ROLE_BY_PLAN = {
+  "1m": "WAIT_1M_ID", // role chờ 1 tháng
+  "6m": "WAIT_6M_ID", // role chờ 6 tháng
+  "1y": "WAIT_1Y_ID"  // role chờ 1 năm
+};
+
+const ROLE_BY_PLAN = {
+  "1m": "VIP_1M_ID", // role VIP 1 tháng
+  "6m": "VIP_6M_ID", // role VIP 6 tháng
+  "1y": "VIP_1Y_ID"  // role VIP 1 năm
+};
+
+// --- Hàm tiện ích chuyển gói thành số tháng ---
+function planToMonth(plan) {
+  switch (plan) {
+    case "1m": return 1;
+    case "6m": return 6;
+    case "1y": return 12;
+    default: return 0;
+  }
+}
+
+// --- Hàm add tháng vào timestamp ---
+function addMonths(base, months) {
+  const d = new Date(base);
+  d.setMonth(d.getMonth() + months);
+  return d.getTime();
 }
   // ===== OPEN MENU =====
   if (i.customId === 'open_vip_menu') {
@@ -600,7 +645,9 @@ cron.schedule(`0 0 14 27 * *`, async () => {
     for (const r of Object.values(ROLE_BY_PLAN)) {
       await member.roles.remove(r).catch(()=>{});
     }
-    if (WAIT_ROLE_ID) await member.roles.remove(WAIT_ROLE_ID).catch(()=>{});
+    for (const r of Object.values(WAIT_ROLE_BY_PLAN)) {
+  await member.roles.remove(r).catch(() => {});
+}
 
     // Reset DB
     await upsertMember(m.id, { plan: null, expireAt: null });
