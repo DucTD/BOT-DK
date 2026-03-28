@@ -118,11 +118,8 @@ async function syncAllMembers() {
 // ================= CONFIG =================
 
 const VIP_ROLE_ID = process.env.VIP_ROLE_ID;
-const WAIT_ROLE_ID = process.env.WAIT_ROLE_ID;
-
 const PRICE_VN = { '1m': 2000000, '6m': 11000000, '1y': 22000000 };
 const PRICE_JP = { '1m': 11000, '6m': 60500, '1y': 121000 };
-
 const PAYMENT_VN = {
   bankName: "Techcombank",
   bankBin: '970407',
@@ -251,9 +248,10 @@ if (['1m', '6m', '1y'].includes(i.customId)) {
   const member = await guild.members.fetch(id).catch(() => null);
 
   // Kiểm tra nếu người dùng đã có role VIP
-  if (VIP_ROLE_ID && member?.roles.cache.has(VIP_ROLE_ID)) {
-    return i.reply({ content: "❌ Bạn đã có VIP", ephemeral: true });
-  }
+  const hasVip = Object.values(ROLE_BY_PLAN).some(r => member?.roles.cache.has(r));
+if (hasVip) {
+  return i.reply({ content: "❌ Bạn đã có VIP", ephemeral: true });
+}
 
   await upsertMember(id, { plan: i.customId, awaitingBill: false });
 
@@ -363,63 +361,79 @@ if (member && data.plan) {
 
   // DM yêu cầu gửi bill
   const dm = await i.user.createDM();
-  await dm.send("📤 Hãy gửi bill qua DM (file hình ảnh)");
+  await dm.send("📤 Hãy gửi bill để bên mình xác minh nhé (file hình ảnh)");
+// ===== COLLECT BILL (FIX CHUẨN) =====
 
-  // Collector bill
-  if (!client._collectors) client._collectors = {};
-  if (client._collectors[id]) client._collectors[id].stop();
+// tạo object nếu chưa có
+if (!client._collectors) client._collectors = {};
 
-  const collector = dm.createMessageCollector({
-    filter: m => m.attachments.size > 0,
-    time: 300000, // 5 phút
-    max: 1
-  });
-  client._collectors[id] = collector;
-  if (client._collectors?.[id]) {
+// stop collector cũ nếu tồn tại
+if (client._collectors[id]) {
   client._collectors[id].stop();
-  delete client._collectors[id];
 }
 
-  collector.on('collect', async m => {
-    // Lưu lastBill, giữ awaitingBill = true
-    await upsertMember(id, { lastBill: m.attachments.first().url });
+// tạo collector mới
+const collector = dm.createMessageCollector({
+  filter: m => m.author.id === id && m.attachments.size > 0,
+  time: 300000,
+  max: 1
+});
 
-    // Gửi bill lên admin channel
-    const embed = new EmbedBuilder()
-      .setTitle("💳 Bill")
-      .setDescription(`<@${id}> - ${data.plan}`)
-      .setImage(m.attachments.first().url);
+// lưu lại
+client._collectors[id] = collector;
 
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`approve_${id}`)
-        .setLabel("Approve")
-        .setStyle(ButtonStyle.Success),
-        new ButtonBuilder()
-    .setCustomId(`reject_${id}`)
-    .setLabel("Reject")
-    .setStyle(ButtonStyle.Danger)
-    );
 
-    const adminChannel = await guild.channels.fetch(process.env.ADMIN_CHANNEL_ID).catch(() => null);
-    if (!adminChannel) return console.log("❌ Không tìm thấy ADMIN_CHANNEL_ID");
-
-    await adminChannel.send({ embeds: [embed], components: [row] });
-
-    // ✅ Thông báo thân thiện cho user
-    await m.reply("✅ Bill đã gửi thành công! Hãy chờ admin duyệt.");
+// ===== WHEN USER SEND BILL =====
+collector.on('collect', async m => {
+  const freshData = await getMember(id);
+  const billUrl = m.attachments.first().url;
+  await upsertMember(id, {
+    lastBill: billUrl
   });
-
-  collector.on('end', async collected => {
+  const embed = new EmbedBuilder().setTitle("💳 Bill").setDescription(`<@${id}> - ${freshData.plan}`).setImage(billUrl);
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`approve_${id}`).setLabel("Approve").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`reject_${id}`).setLabel("Reject").setStyle(ButtonStyle.Danger)
+  );
+  const guild = await client.guilds.fetch(process.env.GUILD_ID);
+  const adminChannel = await guild.channels.fetch(process.env.ADMIN_CHANNEL_ID);
+  if (!adminChannel) {
+  await m.reply("❌ Lỗi hệ thống: không tìm thấy kênh admin");
+  console.log("❌ Không tìm thấy ADMIN_CHANNEL_ID");
+  return;
+}
+  await adminChannel.send({
+    content: `📥 Bill mới từ <@${id}>`,
+    embeds: [embed],
+    components: [row]
+  });
+  await m.reply("✅ Bill đã gửi thành công! Hãy chờ admin duyệt.");
+});
+// ===== WHEN TIMEOUT =====
+ collector.on('end', async collected => {
   delete client._collectors[id]; // cleanup
   billLock.delete(id);  
+
   if (collected.size === 0) {
-    // Nếu không gửi bill, reset awaitingBill
-    await upsertMember(id, { awaitingBill: false });
+
+    const data = await getMember(id); // 👈 THÊM DÒNG NÀY
+
+    // ❗ REMOVE WAIT ROLE (THÊM ĐOẠN NÀY)
+    if (data?.waitRoleId) {
+      const guild = await client.guilds.fetch(process.env.GUILD_ID);
+      const member = await guild.members.fetch(id).catch(()=>null);
+      if (member) {
+        await member.roles.remove(data.waitRoleId).catch(()=>{});
+      }
+    }
+
+    // reset DB
+    await upsertMember(id, { awaitingBill: false, waitRoleId: null });
+
     console.log(`⏰ Reset awaitingBill (không gửi bill): ${id}`);
 
     // Lấy lại thông tin về gói và phương thức thanh toán đã chọn
-    const data = await getMember(id);
+   // const data = await getMember(id);
     if (!data?.plan) return; // Nếu không có gói, không làm gì thêm
 
     // Thông báo thử lại và gửi lại hóa đơn
@@ -435,7 +449,7 @@ if (member && data.plan) {
   await i.reply({ content: "📤 Bạn hãy gửi bill thanh toán cho mình nhé ", flags: 64 });
 }
 
- // ===== APPROVE BILL =====
+ // ===== APPROVE BILL ===== 
 if (i.customId.startsWith('approve_')) {
   await i.deferReply({ ephemeral: true });
 
@@ -443,39 +457,80 @@ if (i.customId.startsWith('approve_')) {
     return i.followUp({ content: "❌ Bạn không có quyền", ephemeral: true });
   }
 
-  const memberId = i.customId.split('_')[1]; // ✅ FIX
+  const memberId = i.customId.split('_')[1];
 
-  const data = await getMember(memberId);
-  if (!data?.plan) return i.followUp({ content: "❌ User chưa chọn gói", ephemeral: true });
+  // 🔴 UI LOCK NGAY (chống double click)
+  const disabledRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('approve_done').setLabel('✅ Approved').setStyle(ButtonStyle.Success).setDisabled(true),
+    new ButtonBuilder().setCustomId('reject_done').setLabel('❌ Reject').setStyle(ButtonStyle.Danger).setDisabled(true)
+  );
+  await i.message.edit({ components: [disabledRow] }).catch(()=>{});
 
-  const guild = await client.guilds.fetch(process.env.GUILD_ID);
-  const member = await guild.members.fetch(memberId).catch(() => null);
-  if (!member) return i.followUp({ content: "❌ Không tìm thấy user", ephemeral: true });
-
-  const now = Date.now();
-  const base = data.expireat && data.expireat > now ? data.expireat : now;
-  const expire = addMonths(base, planToMonth(data.plan));
-
-  await upsertMember(memberId, {
-    expireat: expire,
-    awaitingBill: false,
-    lastBill: null,
-    waitRoleId: null
-  });
-
-  // ❗ remove WAIT role riêng (tối ưu hơn)
-  if (data.waitRoleId) {
-    await member.roles.remove(data.waitRoleId).catch(()=>{});
+  // 🔴 STOP COLLECTOR
+  if (client._collectors?.[memberId]) {
+    client._collectors[memberId].stop();
+    delete client._collectors[memberId];
   }
 
-  // remove VIP cũ
-  await member.roles.remove(Object.values(ROLE_BY_PLAN)).catch(()=>{});
+  // 🔴 BACKEND LOCK
+  if (billLock.has(memberId)) {
+    return i.followUp({ content: "⚠️ Đang xử lý", ephemeral: true });
+  }
+  billLock.add(memberId);
 
-  await member.roles.add(ROLE_BY_PLAN[data.plan]).catch(()=>{});
+  try {
+    const data = await getMember(memberId);
 
-  await member.send(`🎉 VIP đã duyệt!\nHạn: <t:${Math.floor(expire/1000)}:F>`).catch(()=>{});
-  billLock.delete(memberId);
-  await i.followUp({ content: `✅ Approved <@${memberId}>`, ephemeral: true });
+    // 🔴 CHẶN DOUBLE
+    if (!data?.awaitingBill) {
+      return i.followUp({ content: "⚠️ Bill đã được xử lý", ephemeral: true });
+    }
+
+    if (!data?.plan) {
+      return i.followUp({ content: "❌ User chưa chọn gói", ephemeral: true });
+    }
+
+    const guild = await client.guilds.fetch(process.env.GUILD_ID);
+    const member = await guild.members.fetch(memberId).catch(() => null);
+
+    if (!member) {
+      return i.followUp({ content: "❌ Không tìm thấy user", ephemeral: true });
+    }
+
+    const now = Date.now();
+    const base = data.expireat && data.expireat > now ? data.expireat : now;
+    const expire = addMonths(base, planToMonth(data.plan));
+
+    await upsertMember(memberId, {
+      expireat: expire,
+      awaitingBill: false,
+      lastBill: null,
+      waitRoleId: null
+    });
+
+    // remove WAIT role
+    if (data.waitRoleId) {
+      await member.roles.remove(data.waitRoleId).catch(()=>{});
+    }
+
+    // remove VIP cũ
+    for (const r of Object.values(ROLE_BY_PLAN)) {
+      if (r) await member.roles.remove(r).catch(()=>{});
+    }
+
+    // add VIP mới
+    await member.roles.add(ROLE_BY_PLAN[data.plan]).catch(()=>{});
+
+    await member.send(`🎉 VIP đã duyệt!\nHạn: <t:${Math.floor(expire/1000)}:F>`).catch(()=>{});
+
+    await i.followUp({ content: `✅ Approved <@${memberId}>`, ephemeral: true });
+
+  } catch (err) {
+    console.error("❌ Approve error:", err);
+    await i.followUp({ content: "❌ Lỗi khi duyệt bill", ephemeral: true });
+  } finally {
+    billLock.delete(memberId);
+  }
 }
 
   // ===== REJECT BILL =====
@@ -486,33 +541,65 @@ if (i.customId.startsWith('approve_')) {
     return i.followUp({ content: "❌ Bạn không có quyền", ephemeral: true });
   }
 
-  const memberId = i.customId.split('_')[1]; // ✅ FIX
+  const memberId = i.customId.split('_')[1];
 
-  const data = await getMember(memberId);
-  if (!data?.plan) return i.followUp({ content: "❌ User chưa chọn gói", ephemeral: true });
+  // 🔴 UI LOCK NGAY
+  const disabledRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('approve_done').setLabel('Approve').setStyle(ButtonStyle.Success).setDisabled(true),
+    new ButtonBuilder().setCustomId('reject_done').setLabel('🚫 Rejected').setStyle(ButtonStyle.Danger).setDisabled(true)
+  );
+  await i.message.edit({ components: [disabledRow] }).catch(()=>{});
 
-  const guild = await client.guilds.fetch(process.env.GUILD_ID);
-  const member = await guild.members.fetch(memberId).catch(() => null);
-  if (!member) return i.followUp({ content: "❌ Không tìm thấy user", ephemeral: true });
+  // 🔴 STOP COLLECTOR
+  if (client._collectors?.[memberId]) {
+    client._collectors[memberId].stop();
+    delete client._collectors[memberId];
+  }
 
-  await member.send(`
+  // 🔴 BACKEND LOCK
+  if (billLock.has(memberId)) {
+    return i.followUp({ content: "⚠️ Đang xử lý", ephemeral: true });
+  }
+  billLock.add(memberId);
+
+  try {
+    const data = await getMember(memberId);
+
+    // 🔴 CHẶN DOUBLE
+    if (!data?.awaitingBill) {
+      return i.followUp({ content: "⚠️ Bill đã được xử lý", ephemeral: true });
+    }
+
+    const guild = await client.guilds.fetch(process.env.GUILD_ID);
+    const member = await guild.members.fetch(memberId).catch(() => null);
+
+    if (member) {
+      await member.send(`
 ❌ Bill không hợp lệ.
 👉 Vui lòng gửi lại bill đúng.
-  `).catch(()=>{});
+      `).catch(()=>{});
 
-  await upsertMember(memberId, {
-    awaitingBill: false,
-    lastBill: null
-  });
+      // remove WAIT role
+      if (data.waitRoleId) {
+        await member.roles.remove(data.waitRoleId).catch(()=>{});
+      }
+    }
 
-  // ❗ remove WAIT role riêng
-  if (data.waitRoleId) {
-    await member.roles.remove(data.waitRoleId).catch(()=>{});
+    await upsertMember(memberId, {
+      awaitingBill: false,
+      lastBill: null,
+      waitRoleId: null
+    });
+
+    await i.followUp({ content: `🚫 Rejected <@${memberId}>`, ephemeral: true });
+
+  } catch (err) {
+    console.error("❌ Reject error:", err);
+    await i.followUp({ content: "❌ Lỗi khi reject", ephemeral: true });
+  } finally {
+    billLock.delete(memberId);
   }
-  billLock.delete(memberId);
-  await i.followUp({ content: `🚫 Rejected <@${memberId}>`, ephemeral: true });
 }
-
 // --- Hàm tiện ích chuyển gói thành số tháng ---
 function planToMonth(plan) {
   switch (plan) {
@@ -827,6 +914,9 @@ app.get('/approve/:id', async (req, res) => {
   const memberId = req.params.id;
 
   const data = await getMember(memberId);
+  if (!data?.awaitingBill) {
+  return res.send("⚠️ Already processed");
+}
   if (!data?.plan) return res.send("❌ No plan");
 
   const guild = await client.guilds.fetch(process.env.GUILD_ID);
@@ -868,6 +958,9 @@ app.get('/reject/:id', async (req, res) => {
   const memberId = req.params.id;
 
   const data = await getMember(memberId);
+  if (!data?.awaitingBill) {
+  return res.send("⚠️ Already processed");
+}
   if (!data) return res.send("❌ Not found");
 
   const guild = await client.guilds.fetch(process.env.GUILD_ID);
